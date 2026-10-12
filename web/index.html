@@ -16,11 +16,16 @@
   </script>
 </head>
 <body>
+  <main>
+    <div id="visor"></div>
+    <div id="estado"></div>
+    <div id="caja" hidden></div>
+  </main>
   <aside id="panel">
     <h1>Línea de recorte</h1>
 
-    <section>
-      <h2>1. Modelos</h2>
+    <details data-seccion="1. Modelos" open>
+      <summary>1. Modelos</summary>
       <div id="soltar">Arrastrá los STL acá o <button id="elegir" type="button">elegí archivos</button></div>
       <input id="archivos" type="file" accept=".stl,.ply,.obj" multiple hidden />
       <label class="fila">ID del caso <input id="caso" type="text" placeholder="0044" /></label>
@@ -29,64 +34,66 @@
         <tbody></tbody>
       </table>
       <p class="nota" id="nota-carga">Destildá los movimientos que no se usan. El primero tildado de cada maxilar es la base.</p>
-    </section>
+    </details>
 
-    <section>
-      <h2>2. Maxilar</h2>
+    <details data-seccion="2. Maxilar" open>
+      <summary>2. Maxilar</summary>
       <div id="maxilares" class="botones"></div>
-    </section>
+    </details>
 
-    <section>
-      <h2>3. Puntos</h2>
+    <details data-seccion="3. Puntos" open>
+      <summary>3. Puntos</summary>
       <div id="modos" class="botones">
         <button data-modo="v" type="button" title="Tecla 1">Vestibular</button>
         <button data-modo="l" type="button" title="Tecla 2">Lingual</button>
         <button data-modo="e" type="button" title="Tecla 3">Extremos</button>
       </div>
       <p class="nota" id="cuenta"></p>
+      <div class="fila" id="sigue">
+        <span>Los elegidos siguen</span>
+        <label><input id="usa-offset" type="checkbox" /> Offset</label>
+        <label><input id="usa-festoneado" type="checkbox" /> Festoneado</label>
+      </div>
+      <p class="nota">Shift + clic suma o saca un punto de la selección; shift + arrastrar en un lugar vacío elige todos los del rectángulo. Sin offset o sin festoneado, el diente no se mueve con ese deslizador y la curva va recta.</p>
       <div class="botones">
         <button id="borrar-punto" type="button" title="Supr">Borrar punto</button>
         <button id="borrar-clave" type="button" title="Tecla K">Quitar keyframe</button>
         <button id="restablecer" type="button" title="Vuelve a las tangentes calculadas">Restablecer festón</button>
       </div>
-    </section>
+    </details>
 
-    <section>
-      <h2>4. Exportar</h2>
+    <details data-seccion="4. Exportar" open>
+      <summary>4. Exportar</summary>
       <label class="fila">Formato <select id="formato"></select></label>
       <label class="fila">Puntos por curva <input id="puntos" type="number" min="10" max="5000" step="10" value="500" /></label>
       <div class="botones"><button id="exportar" type="button">Exportar</button></div>
-    </section>
+    </details>
 
-    <section>
-      <h2>Trabajo</h2>
+    <details data-seccion="Trabajo" open>
+      <summary>Trabajo</summary>
       <div class="botones">
         <button id="guardar" type="button">Guardar</button>
         <button id="abrir" type="button">Abrir</button>
         <button id="salir" type="button" title="Apaga el servidor local">Salir</button>
       </div>
       <input id="trabajo" type="file" accept=".json" hidden />
-    </section>
+    </details>
 
-    <section>
-      <h2>Actualizaciones</h2>
+    <details data-seccion="Actualizaciones" open>
+      <summary>Actualizaciones</summary>
       <p class="nota" id="version"></p>
       <div class="botones">
         <button id="buscar-version" type="button">Buscar versiones nuevas</button>
         <button id="volver-version" type="button" hidden>Volver a la anterior</button>
       </div>
       <div id="versiones"></div>
-    </section>
+    </details>
 
-    <section class="ayuda">
-      <h2>Mouse</h2>
-      <p>Clic izquierdo: marcar y mover puntos; con un punto elegido, arrastrar sus manijas ajusta ese festón.<br />Clic derecho: orbitar.<br />Shift + clic derecho: desplazar.<br />Rueda: zoom.<br />← →: cambiar de movimiento.</p>
-    </section>
+    <details class="ayuda" data-seccion="Mouse" open>
+      <summary>Mouse</summary>
+      <p>Clic izquierdo: marcar (con un modo prendido) y mover puntos, también los intermedios; con un punto elegido, arrastrar sus manijas ajusta ese festón.<br />Shift + arrastrar con el izquierdo: elegir varios puntos.<br />Clic derecho: orbitar.<br />Shift + clic derecho: desplazar.<br />Rueda: zoom.<br />← →: cambiar de movimiento.<br />1, 2, 3: prender o apagar un modo; Esc: apagarlo.</p>
+    </details>
   </aside>
-  <main>
-    <div id="visor"></div>
-    <div id="estado"></div>
-  </main>
   <script type="module" src="./src/main.js"></script>
 </body>
 </html>

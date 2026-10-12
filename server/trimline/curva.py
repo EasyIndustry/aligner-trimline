@@ -58,21 +58,38 @@ def ordenar(controladores: list[dict], arriba: np.ndarray) -> dict:
     }
 
 
-def _claves(tramo: list[dict], arriba: np.ndarray, offset: float, amplitud: float, cerrada: bool) -> tuple[np.ndarray, list[dict]]:
-    """Los puntos por donde pasa la curva: crestas y crestas inversas, ya desplazados."""
+def clave_inversa(a: str, b: str) -> str:
+    """Cómo se nombra la cresta inversa entre dos controladores, sin importar el sentido."""
+    return "|".join(sorted((a, b)))
+
+
+def _claves(tramo: list[dict], arriba: np.ndarray, offset: float, amplitud: float, cerrada: bool,
+            inversas: dict | None = None) -> tuple[np.ndarray, list[dict]]:
+    """Los puntos por donde pasa la curva: crestas y crestas inversas, ya desplazados.
+
+    Un controlador con `offset: False` no se desplaza con el offset global, y uno con
+    `festoneado: False` no festonea: la cresta inversa entre dos así queda recta. Entre uno que
+    sí y uno que no, va a mitad de camino. `inversas[clave_inversa(a, b)]` es lo que el usuario
+    corrió a mano esa cresta inversa, sobre la posición calculada.
+    """
+    inversas = inversas or {}
     pts, info = [], []
     n = len(tramo)
+    usa = lambda c, k: 1.0 if c.get(k, True) is not False else 0.0
     for i, c in enumerate(tramo):
         p = np.asarray(c["pos"], dtype=np.float64)
-        pts.append(p + offset * arriba)
+        pts.append(p + offset * usa(c, "offset") * arriba)
         info.append({"clase": "cresta", "id": c["id"], "tipo": c["tipo"]})
         if i + 1 == n and not cerrada:
             break
         sig = tramo[(i + 1) % n]
         if c["tipo"] == sig["tipo"] and c["tipo"] != "e":       # entre dos dientes del mismo lado
             medio = (p + np.asarray(sig["pos"], dtype=np.float64)) / 2
-            pts.append(medio + (offset + amplitud) * arriba)
-            info.append({"clase": "inversa", "entre": [c["id"], sig["id"]], "tipo": c["tipo"]})
+            desp = (offset * (usa(c, "offset") + usa(sig, "offset")) / 2
+                    + amplitud * (usa(c, "festoneado") + usa(sig, "festoneado")) / 2)
+            clave = clave_inversa(c["id"], sig["id"])
+            pts.append(medio + desp * arriba + np.asarray(inversas.get(clave, (0, 0, 0)), dtype=np.float64))
+            info.append({"clase": "inversa", "entre": [c["id"], sig["id"]], "clave": clave, "tipo": c["tipo"]})
     return np.array(pts), info
 
 
@@ -150,10 +167,12 @@ def largo_de(p: np.ndarray, cerrada: bool) -> float:
 
 
 def generar(malla: Malla, controladores: list[dict], offset: float = 0.0, amplitud: float = 0.0,
-            n: int | None = 500, paso: float | None = None, ancho: float = ANCHO) -> dict:
+            n: int | None = 500, paso: float | None = None, ancho: float = ANCHO,
+            inversas: dict | None = None) -> dict:
     """La curva de un movimiento, apoyada sobre su malla.
 
-    controladores: [{id, tipo: 'v'|'l'|'e', pos: [x, y, z], manijas?: {a?, b?}}], en cualquier orden.
+    controladores: [{id, tipo: 'v'|'l'|'e', pos: [x, y, z], manijas?: {a?, b?}, offset?: bool,
+    festoneado?: bool}], en cualquier orden. inversas: {clave_inversa(a, b): [dx, dy, dz]}.
     Devuelve {cerrada, tramos: [{puntos, claves, info, manijas}], largo}. `claves` son las crestas
     y las crestas inversas sobre la malla, en el orden de la curva, y `manijas` sus dos manijas
     Bézier (sirven para dibujarlas y para agarrarlas).
@@ -162,7 +181,7 @@ def generar(malla: Malla, controladores: list[dict], offset: float = 0.0, amplit
     propias = {c["id"]: c["manijas"] for c in controladores if c.get("manijas")}
     tramos, total = [], 0.0
     for tramo in orden["tramos"]:
-        claves, info = _claves(tramo, malla.arriba, offset, amplitud, orden["cerrada"])
+        claves, info = _claves(tramo, malla.arriba, offset, amplitud, orden["cerrada"], inversas)
         claves = malla.mas_cercano(claves)
         manijas = _manijas(claves, info, malla.arriba, float(ancho), propias, orden["cerrada"])
         fina = malla.mas_cercano(_bezier(claves, manijas, orden["cerrada"]))

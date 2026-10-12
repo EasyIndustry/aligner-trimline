@@ -7,8 +7,10 @@ Un maxilar es:
       "offset": 0.0, "amplitud": 0.0, "ancho": 0.4,           # valen para todo el tratamiento
       "controladores": [
         {"id": "c1", "tipo": "v", "claves": {"00": [x, y, z], "08": [x, y, z]},
-         "manijas": {"a": [dx, dy, dz], "b": [dx, dy, dz]}},   # opcional: su festón puesto a mano
+         "manijas": {"a": [dx, dy, dz], "b": [dx, dy, dz]},    # opcional: su festón puesto a mano
+         "offset": true, "festoneado": true},                  # opcional: si lo mueven los deslizadores
       ],
+      "inversas": {"c1|c2": [dx, dy, dz]},                     # opcional: crestas inversas corridas a mano
     }
 
 `claves` son los KEYFRAMES del controlador: posiciones absolutas en los movimientos donde el
@@ -51,13 +53,14 @@ def resolver(maxilar: dict, num: str, n: int | None = 500, paso: float | None = 
         if p is None:
             continue
         ctrl.append({"id": c["id"], "tipo": c["tipo"], "pos": p, "clave": num in c.get("claves", {}),
-                     "manijas": c.get("manijas")})
+                     "manijas": c.get("manijas"),
+                     "offset": c.get("offset", True), "festoneado": c.get("festoneado", True)})
     if ctrl:
         sobre = malla.mas_cercano(np.array([c["pos"] for c in ctrl]))
         for c, p in zip(ctrl, sobre):
             c["pos"] = p
     res = curva.generar(malla, ctrl, float(maxilar.get("offset", 0.0)), float(maxilar.get("amplitud", 0.0)), n=n, paso=paso,
-                        ancho=float(maxilar.get("ancho", curva.ANCHO)))
+                        ancho=float(maxilar.get("ancho", curva.ANCHO)), inversas=maxilar.get("inversas"))
     res["controladores"] = ctrl
     res["num"] = num
     return res

@@ -146,3 +146,47 @@ def test_manija_puesta_a_mano(malla):
     assert np.allclose(r["manijas"][i, 1] - r["claves"][i], [0, 0, 3.0])       # la puesta a mano
     assert np.allclose(r["manijas"][i, 0], antes["manijas"][i, 0])             # la otra sigue calculada
     assert not np.allclose(r["puntos"], antes["puntos"], atol=1e-3)
+
+
+def test_dientes_sin_festoneado_ni_offset(malla):
+    plano = proyecto.resolver(maxilar(malla), "00")["tramos"][0]
+    m = maxilar(malla, amplitud=3.0, offset=1.5)
+    for c in m["controladores"]:
+        if c["id"] in ("v2", "v3", "v4"):
+            c["festoneado"] = False
+    r = proyecto.resolver(m, "00")["tramos"][0]
+    claves = {(info.get("id") or info["clave"]): p for info, p in zip(r["info"], r["claves"])}
+    base = {(info.get("id") or info["clave"]): p for info, p in zip(plano["info"], plano["claves"])}
+    # entre dos dientes sin festoneado la cresta inversa queda recta: solo el offset la mueve
+    recta, festo = claves["v2|v3"][2] - base["v2|v3"][2], claves["v5|v6"][2] - base["v5|v6"][2]
+    assert recta > 0.3 and festo > recta + 1.0
+    # sin offset, la cresta no se mueve aunque el resto sí
+    m["controladores"][3]["offset"] = False
+    r = proyecto.resolver(m, "00")["tramos"][0]
+    i = next(k for k, info in enumerate(r["info"]) if info.get("id") == "v3")
+    j = next(k for k, info in enumerate(plano["info"]) if info.get("id") == "v3")
+    assert np.allclose(r["claves"][i], plano["claves"][j], atol=1e-6)
+
+
+def test_cresta_inversa_corrida_a_mano_sigue_al_feston(malla):
+    m = maxilar(malla, inversas={"v3|v4": [0.0, 0.0, 2.0]})
+    r = proyecto.resolver(m, "00")["tramos"][0]
+    antes = proyecto.resolver(maxilar(malla), "00")["tramos"][0]
+    i = next(k for k, info in enumerate(r["info"]) if info.get("clave") == "v3|v4")
+    assert r["claves"][i][2] > antes["claves"][i][2] + 1.0
+    # mover los dientes vecinos la arrastra: el ajuste es relativo, no una posición fija
+    for c in m["controladores"]:
+        if c["id"] in ("v3", "v4"):
+            c["claves"]["04"] = (np.array(c["claves"]["00"]) + [0, 0, -2.0]).tolist()
+    r4 = proyecto.resolver(m, "04")["tramos"][0]
+    assert r4["claves"][i][2] < r["claves"][i][2] - 1.0
+
+
+def test_manija_de_un_extremo(malla):
+    m = maxilar(malla)
+    antes = proyecto.resolver(m, "00")["tramos"][0]
+    m["controladores"][-1]["manijas"] = {"a": [0.0, 0.0, 2.5]}
+    r = proyecto.resolver(m, "00")["tramos"][0]
+    i = next(k for k, info in enumerate(r["info"]) if info.get("id") == m["controladores"][-1]["id"])
+    assert np.allclose(r["manijas"][i, 0] - r["claves"][i], [0, 0, 2.5])
+    assert not np.allclose(r["puntos"], antes["puntos"], atol=1e-3)

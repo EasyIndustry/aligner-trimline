@@ -15,16 +15,22 @@ const DESLIZADORES = [
   { id: 'ancho', titulo: 'Ancho de festón', min: 0.1, max: 0.7, paso: 0.01, sinSigno: true },
 ];
 
-const nuevoMaxilar = () => ({ offset: 0, amplitud: 0, ancho: 0.4, controladores: [] });
+// inversas: lo que se corrió a mano cada punto intermedio, { 'c1|c2': [dx, dy, dz] }
+const nuevoMaxilar = () => ({ offset: 0, amplitud: 0, ancho: 0.4, controladores: [], inversas: {} });
 const estado = {
   /** @type {{ malla: string, nombre: string, maxilar: string | null, mov: string, usar: boolean, arriba: number[] }[]} */
   archivos: [],
   maxilares: { sup: nuevoMaxilar(), inf: nuevoMaxilar() },
   maxilar: /** @type {'sup' | 'inf' | null} */ (null),
   num: /** @type {string | null} */ (null),
-  modo: 'v',
+  /** El modo de marcar puntos; null: apagado, los clics no agregan nada. */
+  modo: /** @type {'v' | 'l' | 'e' | null} */ ('v'),
+  /** El punto elegido: un controlador, o `i:<clave>` si es un punto intermedio. */
   seleccion: /** @type {string | null} */ (null),
+  /** Los controladores elegidos (shift + clic suma): a ellos van las casillas de offset y festoneado. */
+  elegidos: /** @type {Set<string>} */ (new Set()),
 };
+const esInversa = (id) => !!id?.startsWith('i:');
 /** Lo que resolvió el servidor: curvas[maxilar][num]. */
 const curvas = { sup: {}, inf: {} };
 /** Lo que traía un trabajo abierto, para reconocer sus modelos cuando se arrastren. */
@@ -93,6 +99,7 @@ function alCambiarArchivos() {
 function elegirMaxilar(maxilar, encuadrar = false) {
   estado.maxilar = maxilar;
   estado.seleccion = null;
+  estado.elegidos = new Set();
   estado.num = maxilar ? base(maxilar) : null;
   if (maxilar) {
     const m = movimientos(maxilar)[0];
@@ -116,7 +123,7 @@ function irA(num) {
 function mostrar() {
   const mov = estado.maxilar ? movimientos(estado.maxilar).find((m) => m.num === estado.num) : null;
   visor.mostrar(mov?.malla ?? null);
-  visor.dibujar(mov ? curvas[estado.maxilar][estado.num] ?? null : null, estado.seleccion);
+  visor.dibujar(mov ? curvas[estado.maxilar][estado.num] ?? null : null, estado.seleccion, estado.elegidos);
   pintarHud();
 }
 
@@ -132,7 +139,7 @@ function resolverTodo({ soloActual = false } = {}) {
     if (mio !== turno && soloActual) return;                 // llegó tarde: ya hay algo más nuevo
     Object.assign(curvas[maxilar], r.movimientos);
     if (maxilar === estado.maxilar && !arrastre) mostrar();
-    else if (maxilar === estado.maxilar) visor.dibujar(curvas[maxilar][estado.num] ?? null, estado.seleccion);
+    else if (maxilar === estado.maxilar) visor.dibujar(curvas[maxilar][estado.num] ?? null, estado.seleccion, estado.elegidos);
   };
   api.resolver(cuerpo, [estado.num]).then(recibir).catch((e) => avisar(e.message, true));
   clearTimeout(espera);
@@ -144,8 +151,19 @@ function resolverTodo({ soloActual = false } = {}) {
 }
 
 // ---------- gestos sobre el visor ----------
-let arrastre = /** @type {{ id: string, movio: boolean, manija?: { lado: string, clave: number[], pos: number[] } } | null} */ (null);
+let arrastre = /** @type {{ id: string, movio: boolean, manija?: { lado: string, clave: number[], pos: number[] }, inversa?: { clave: string, desde: number[], previo: number[] } } | null} */ (null);
 let ultimoPedido = 0;
+/** Shift + arrastrar en un lugar vacío: el rectángulo que elige muchos puntos de una. */
+let caja = /** @type {{ x0: number, y0: number } | null} */ (null);
+function pintarCaja(x, y) {
+  const e = $('caja');
+  e.hidden = !caja;
+  if (!caja) return;
+  Object.assign(e.style, {
+    left: `${Math.min(caja.x0, x)}px`, top: `${Math.min(caja.y0, y)}px`,
+    width: `${Math.abs(x - caja.x0)}px`, height: `${Math.abs(y - caja.y0)}px`,
+  });
+}
 const enLienzo = (ev) => { const r = visor.lienzo.getBoundingClientRect(); return [ev.clientX - r.left, ev.clientY - r.top]; };
 
 visor.lienzo.addEventListener('pointerdown', (ev) => {
@@ -162,10 +180,41 @@ visor.lienzo.addEventListener('pointerdown', (ev) => {
     return;
   }
   const id = visor.controladorEn(x, y);
+  if (id && ev.shiftKey && !esInversa(id)) {
+    // shift suma o saca el punto de la selección, sin arrastrar
+    if (estado.elegidos.has(id)) {
+      estado.elegidos.delete(id);
+      estado.seleccion = [...estado.elegidos].at(-1) ?? null;
+    } else {
+      estado.elegidos.add(id);
+      estado.seleccion = id;
+    }
+    mostrar(); pintarPanel();
+    return;
+  }
   if (id) {
+    // agarrar uno que ya estaba elegido no deshace la selección
+    if (!estado.elegidos.has(id)) estado.elegidos = esInversa(id) ? new Set() : new Set([id]);
     estado.seleccion = id;
     arrastre = { id, movio: false };
+    if (esInversa(id)) {
+      const clave = id.slice(2);
+      arrastre.inversa = { clave, desde: visor.posicion(id) ?? [0, 0, 0], previo: max.inversas?.[clave] ?? [0, 0, 0] };
+    }
     mostrar(); pintarPanel();
+    return;
+  }
+  if (ev.shiftKey) {
+    caja = { x0: x, y0: y };
+    pintarCaja(x, y);
+    return;
+  }
+  if (!estado.modo) {
+    // sin modo de marcar, un clic afuera de los puntos suelta la selección
+    if (estado.seleccion || estado.elegidos.size) {
+      estado.seleccion = null; estado.elegidos = new Set();
+      mostrar(); pintarPanel();
+    }
     return;
   }
   const golpe = visor.picar(x, y);
@@ -183,6 +232,7 @@ visor.lienzo.addEventListener('pointerdown', (ev) => {
   const nuevo = { id: `c${Date.now().toString(36)}${Math.floor(Math.random() * 1e3)}`, tipo: estado.modo, claves: { [estado.num]: golpe.pos } };
   max.controladores.push(nuevo);
   estado.seleccion = nuevo.id;
+  estado.elegidos = new Set([nuevo.id]);
   pintarPanel();
   resolverTodo();
 });
@@ -190,7 +240,21 @@ visor.lienzo.addEventListener('pointerdown', (ev) => {
 visor.lienzo.addEventListener('pointermove', (ev) => {
   const [x, y] = enLienzo(ev);
   if (hud.arrastrando) { hud.mover(x); return; }
+  if (caja) { pintarCaja(x, y); return; }
   if (!arrastre) return;
+  if (arrastre.inversa) {
+    // el punto intermedio guarda cuánto se corrió de donde lo pone la curva: sigue a sus dientes
+    const golpe = visor.picar(x, y);
+    if (!golpe) return;
+    const { clave, desde, previo } = arrastre.inversa;
+    const max = actual();
+    max.inversas = { ...max.inversas, [clave]: previo.map((v, k) => v + golpe.pos[k] - desde[k]) };
+    arrastre.movio = true;
+    visor.moverPunto(arrastre.id, golpe.pos);
+    const ahora = performance.now();
+    if (ahora - ultimoPedido > 60) { ultimoPedido = ahora; resolverTodo({ soloActual: true }); }
+    return;
+  }
   const c = actual().controladores.find((k) => k.id === arrastre.id);
   if (!c) return;
   if (arrastre.manija) {
@@ -215,8 +279,21 @@ visor.lienzo.addEventListener('pointermove', (ev) => {
 });
 
 function soltar(ev) {
-  const [x] = enLienzo(ev);
+  const [x, y] = enLienzo(ev);
   if (hud.arrastrando) { hud.soltar(x); return; }
+  if (caja) {
+    // los de adentro se suman a la selección
+    const ids = visor.controladoresEn(caja.x0, caja.y0, x, y);
+    caja = null;
+    pintarCaja(x, y);
+    if (!ids.length) return;
+    if (esInversa(estado.seleccion)) estado.seleccion = null;
+    for (const id of ids) estado.elegidos.add(id);
+    estado.seleccion ??= ids.at(-1) ?? null;
+    mostrar(); pintarPanel();
+    avisar(`${estado.elegidos.size} puntos elegidos`);
+    return;
+  }
   if (!arrastre) return;
   const movio = arrastre.movio;
   arrastre = null;
@@ -237,16 +314,32 @@ function deslizar(id, valor, final) {
   else if (ahora - ultimoPedido > 60) { ultimoPedido = ahora; resolverTodo({ soloActual: true }); }
 }
 
+/** Saca lo que se le hizo a mano a un punto intermedio: vuelve adonde lo pone la curva. */
+function restablecerInversa() {
+  const max = actual();
+  const clave = estado.seleccion?.slice(2);
+  if (!max || !clave || !max.inversas?.[clave]) return;
+  const { [clave]: _, ...resto } = max.inversas;
+  max.inversas = resto;
+  pintarPanel(); resolverTodo();
+}
+
 function borrarPunto() {
   const max = actual();
   if (!max || !estado.seleccion) return;
-  max.controladores = max.controladores.filter((c) => c.id !== estado.seleccion);
+  if (esInversa(estado.seleccion)) { restablecerInversa(); return; }
+  const borrar = new Set([...estado.elegidos, estado.seleccion]);
+  max.controladores = max.controladores.filter((c) => !borrar.has(c.id));
+  // los ajustes de los puntos intermedios de esos dientes ya no tienen a quién seguir
+  max.inversas = Object.fromEntries(Object.entries(max.inversas ?? {}).filter(([k]) => !k.split('|').some((id) => borrar.has(id))));
   estado.seleccion = null;
+  estado.elegidos = new Set();
   curvas[estado.maxilar] = {};
   pintarPanel(); resolverTodo();
 }
 
 function restablecerFeston() {
+  if (esInversa(estado.seleccion)) { restablecerInversa(); return; }
   const c = actual()?.controladores.find((k) => k.id === estado.seleccion);
   if (!c?.manijas) return;
   delete c.manijas;
@@ -277,11 +370,13 @@ window.addEventListener('keydown', (ev) => {
   else if (ev.key === '1') elegirModo('v');
   else if (ev.key === '2') elegirModo('l');
   else if (ev.key === '3') elegirModo('e');
+  else if (ev.key === 'Escape') { estado.modo = null; pintarPanel(); }
   else return;
   ev.preventDefault();
 });
 
-function elegirModo(modo) { estado.modo = modo; pintarPanel(); }
+/** Los modos son interruptores: elegir el que ya está prendido lo apaga. */
+function elegirModo(modo) { estado.modo = estado.modo === modo ? null : modo; pintarPanel(); }
 
 // ---------- el HUD ----------
 function pintarHud() {
@@ -326,12 +421,22 @@ function pintarPanel() {
   const max = actual();
   const cuenta = (t) => max?.controladores.filter((c) => c.tipo === t).length ?? 0;
   $('cuenta').textContent = max
-    ? `Vestibulares ${cuenta('v')} · linguales ${cuenta('l')} · extremos ${cuenta('e')}/2. Marcando: ${MODOS[estado.modo]}.`
+    ? `Vestibulares ${cuenta('v')} · linguales ${cuenta('l')} · extremos ${cuenta('e')}/2. ${estado.modo ? `Marcando: ${MODOS[estado.modo]}.` : 'Sin marcar: prendé un modo para agregar puntos.'}`
     : 'Cargá los modelos para empezar.';
   /** @type {HTMLButtonElement} */ ($('borrar-punto')).disabled = !estado.seleccion;
   const sel = max?.controladores.find((c) => c.id === estado.seleccion);
   /** @type {HTMLButtonElement} */ ($('borrar-clave')).disabled = !(sel && estado.num && sel.claves[estado.num] && estado.num !== base(estado.maxilar));
-  /** @type {HTMLButtonElement} */ ($('restablecer')).disabled = !sel?.manijas;
+  const inversa = esInversa(estado.seleccion) ? max?.inversas?.[estado.seleccion.slice(2)] : null;
+  /** @type {HTMLButtonElement} */ ($('restablecer')).disabled = !(sel?.manijas || inversa);
+  // las casillas muestran a los elegidos: tildada si todos siguen, a medias si algunos
+  const elegidos = max?.controladores.filter((c) => estado.elegidos.has(c.id)) ?? [];
+  for (const campo of ['offset', 'festoneado']) {
+    const caja = /** @type {HTMLInputElement} */ ($(`usa-${campo}`));
+    const siguen = elegidos.filter((c) => c[campo] !== false).length;
+    caja.disabled = !elegidos.length;
+    caja.checked = elegidos.length > 0 && siguen === elegidos.length;
+    caja.indeterminate = siguen > 0 && siguen < elegidos.length;
+  }
   pintarHud();
 }
 
@@ -350,6 +455,23 @@ for (const b of document.querySelectorAll('#modos button')) b.addEventListener('
 $('borrar-punto').addEventListener('click', borrarPunto);
 $('borrar-clave').addEventListener('click', quitarClave);
 $('restablecer').addEventListener('click', restablecerFeston);
+for (const campo of ['offset', 'festoneado']) {
+  $(`usa-${campo}`).addEventListener('change', (ev) => {
+    const sigue = /** @type {HTMLInputElement} */ (ev.target).checked;
+    for (const c of actual()?.controladores ?? []) {
+      if (!estado.elegidos.has(c.id)) continue;
+      if (sigue) delete c[campo]; else c[campo] = false;
+    }
+    pintarPanel(); resolverTodo();
+  });
+}
+
+// las secciones del panel se pliegan, y cada una se acuerda de cómo quedó
+for (const d of /** @type {NodeListOf<HTMLDetailsElement>} */ (document.querySelectorAll('#panel details'))) {
+  const clave = `trimline.seccion.${d.dataset.seccion}`;
+  try { const v = localStorage.getItem(clave); if (v !== null) d.open = v === '1'; } catch { /* sin almacenamiento */ }
+  d.addEventListener('toggle', () => { try { localStorage.setItem(clave, d.open ? '1' : '0'); } catch { /* idem */ } });
+}
 
 const soltarEn = $('soltar');
 $('elegir').addEventListener('click', () => $('archivos').click());

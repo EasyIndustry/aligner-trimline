@@ -104,9 +104,12 @@ export async function crearVisor(contenedor) {
 
   /**
    * Dibuja lo que resolvió el servidor para el movimiento que se mira.
+   * Los puntos intermedios (crestas inversas) se agarran como los demás, con id `i:<clave>`.
    * @param {any} r { cerrada, tramos: [{ puntos, claves, info }], controladores } o null
+   * @param {string | null} seleccion el punto elegido, el que muestra sus manijas
+   * @param {Set<string>} [elegidos] los demás que se marcan como elegidos
    */
-  function dibujar(r, seleccion) {
+  function dibujar(r, seleccion, elegidos = new Set()) {
     puntos.clear();
     porId.clear();
     manijas = [];
@@ -114,16 +117,18 @@ export async function crearVisor(contenedor) {
     lineas = [];
     if (!r) return;
     for (const c of r.controladores) {
-      const sel = c.id === seleccion;
+      const sel = c.id === seleccion || elegidos.has(c.id);
       // con keyframe en este movimiento se ve lleno y más grande; sin él, es una posición interpolada
       porId.set(c.id, punto(c.pos, sel ? matPunto.seleccion : matPunto[c.tipo], (c.clave ? RADIO_PX : RADIO_PX * 0.65) * (sel ? 1.25 : 1), c.id));
     }
     for (const t of r.tramos) {
       t.info.forEach((info, i) => {
-        if (info.clase === 'inversa') punto(t.claves.slice(i * 3, i * 3 + 3), matPunto.inversa, 3, null);
+        if (info.clase !== 'inversa') return;
+        const id = `i:${info.clave}`;
+        porId.set(id, punto(t.claves.slice(i * 3, i * 3 + 3), id === seleccion ? matPunto.seleccion : matPunto.inversa, id === seleccion ? 4.5 : 3.5, id));
       });
       // las manijas Bézier del punto elegido: una línea a cada lado y un cuadradito para agarrar
-      const i = t.info.findIndex((info) => info.clase === 'cresta' && info.id === seleccion && info.tipo !== 'e');
+      const i = t.info.findIndex((info) => info.clase === 'cresta' && info.id === seleccion);
       if (i >= 0) {
         const k = t.claves.slice(i * 3, i * 3 + 3);
         for (const lado of [0, 1]) {
@@ -148,6 +153,9 @@ export async function crearVisor(contenedor) {
       lineas.push(linea);
     }
   }
+
+  /** Dónde está dibujado un punto (coordenadas del archivo), o null. */
+  const posicion = (id) => porId.get(id)?.position.toArray() ?? null;
 
   /** Mueve un controlador ya dibujado, sin esperar al servidor (mientras se arrastra). */
   function moverPunto(id, pos) {
@@ -177,20 +185,36 @@ export async function crearVisor(contenedor) {
     return { pos: [p.x, p.y, p.z], cara: golpe.faceIndex };
   }
 
+  /** Dónde se ve un punto dibujado: [x, y] en píxeles, o null si queda detrás de la cámara o tapado. */
+  function enPantalla(m) {
+    m.getWorldPosition(mundo);
+    const [px, py, prof] = motor.view.project([mundo.x, mundo.y, mundo.z]);
+    if (prof < 0 || prof > 1) return null;
+    // un punto tapado por el modelo no se agarra: el rayo tiene que llegar hasta él
+    const golpe = picar(px, py);
+    if (golpe && m.position.distanceTo(new THREE.Vector3(...golpe.pos)) > 1.5) return null;
+    return [px, py];
+  }
+
   /** El controlador que está bajo el mouse (a menos de `tol` píxeles), o null. */
   function controladorEn(x, y, tol = 11) {
     let mejor = null, dist = tol;
     for (const [id, m] of porId) {
-      m.getWorldPosition(mundo);
-      const [px, py, prof] = motor.view.project([mundo.x, mundo.y, mundo.z]);
-      const d = Math.hypot(px - x, py - y);
-      if (prof < 0 || prof > 1 || d >= dist) continue;
-      // un punto tapado por el modelo no se agarra: el rayo tiene que llegar hasta él
-      const golpe = picar(px, py);
-      if (golpe && m.position.distanceTo(new THREE.Vector3(...golpe.pos)) > 1.5) continue;
-      dist = d; mejor = id;
+      const p = enPantalla(m);
+      const d = p ? Math.hypot(p[0] - x, p[1] - y) : Infinity;
+      if (d < dist) { dist = d; mejor = id; }
     }
     return mejor;
+  }
+
+  /** Los controladores (no los puntos intermedios) que se ven dentro del rectángulo, en píxeles. */
+  function controladoresEn(x0, y0, x1, y1) {
+    const [xa, xb, ya, yb] = [Math.min(x0, x1), Math.max(x0, x1), Math.min(y0, y1), Math.max(y0, y1)];
+    return [...porId].filter(([id, m]) => {
+      if (id.startsWith('i:')) return false;
+      const p = enPantalla(m);
+      return p && p[0] >= xa && p[0] <= xb && p[1] >= ya && p[1] <= yb;
+    }).map(([id]) => id);
   }
 
   /** La manija que está bajo el mouse: { lado, clave } o null. */
@@ -226,5 +250,5 @@ export async function crearVisor(contenedor) {
     return motor.view.project([p.x, p.y, p.z]);
   }
 
-  return { aPantalla, manijaEn, enPlano, moverManija, motor, lienzo: motor.renderer.domElement, registrar, tiene: (id) => geometrias.has(id), orientar, mostrar, encuadrar, dibujar, moverPunto, picar, controladorEn };
+  return { aPantalla, posicion, controladoresEn, manijaEn, enPlano, moverManija, motor, lienzo: motor.renderer.domElement, registrar, tiene: (id) => geometrias.has(id), orientar, mostrar, encuadrar, dibujar, moverPunto, picar, controladorEn };
 }
