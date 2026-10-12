@@ -39,3 +39,16 @@ def test_si_nada_responde_dice_por_que(monkeypatch):
     monkeypatch.setattr(actualizar, "_pedir", pedir)
     e = actualizar.estado(buscar=True)
     assert e["releases"] is None and "sin red" in e["error"]
+
+
+def test_valida_con_los_certificados_del_sistema(monkeypatch):
+    import builtins
+    import ssl
+
+    import truststore
+    assert isinstance(actualizar._contexto(), truststore.SSLContext)
+    # una instalación vieja, sin truststore, sigue andando con el contexto de Python
+    importar = builtins.__import__
+    monkeypatch.setattr(builtins, "__import__", lambda n, *a, **k: (_ for _ in ()).throw(ImportError(n)) if n == "truststore" else importar(n, *a, **k))
+    c = actualizar._contexto()
+    assert isinstance(c, ssl.SSLContext) and not isinstance(c, truststore.SSLContext)

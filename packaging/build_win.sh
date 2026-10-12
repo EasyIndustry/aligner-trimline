@@ -26,7 +26,7 @@ PYTHON="${PYTHON:-python3}"            # el Python del que arma: necesita pip y 
 # acá se fija con cuál se prueba.
 PAQUETES=(
   "fastapi==0.143.0" "uvicorn==0.54.0" "numpy==2.5.4" "scipy==1.18.1" "trimesh==5.1.1"
-  "pystray==0.19.5" "pillow==12.3.0"
+  "pystray==0.19.5" "pillow==12.3.0" "truststore==0.10.4"
 )
 
 rm -rf "$BUILD"

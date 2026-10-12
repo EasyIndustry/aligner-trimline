@@ -22,6 +22,7 @@ import json
 import os
 import re
 import shutil
+import ssl
 import tarfile
 import time
 import urllib.error
@@ -52,13 +53,24 @@ def marca() -> dict:
         return {}
 
 
+def _contexto() -> ssl.SSLContext:
+    """Los certificados los valida el sistema operativo, no la lista propia de Python: en
+    Windows Python no baja las raíces que faltan ni ve bien las que agrega la empresa (antivirus
+    o proxy que inspecciona el tráfico), y la consulta a GitHub falla aunque el navegador ande."""
+    try:
+        import truststore
+        return truststore.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+    except ImportError:                                  # instalaciones viejas, sin la librería
+        return ssl.create_default_context()
+
+
 def _pedir(url: str, timeout: float = 20) -> bytes:
     cabeceras = {"User-Agent": "aligner-trimline", "Accept": "application/vnd.github+json"}
     token = os.environ.get("TRIMLINE_GITHUB_TOKEN")        # solo hace falta si el repo pasa a privado
     if token:
         cabeceras["Authorization"] = f"Bearer {token}"
     try:
-        with urllib.request.urlopen(urllib.request.Request(url, headers=cabeceras), timeout=timeout) as r:
+        with urllib.request.urlopen(urllib.request.Request(url, headers=cabeceras), timeout=timeout, context=_contexto()) as r:
             return r.read()
     except urllib.error.HTTPError as e:
         raise OSError(_motivo(e)) from None

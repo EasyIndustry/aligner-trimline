@@ -5,6 +5,8 @@ uvicorn>=0.32
 numpy>=2.0
 scipy>=1.13
 trimesh>=4.5
+# valida los certificados con el almacén del sistema (el actualizador, en redes de empresa)
+truststore>=0.10
 # el ícono en la bandeja del sistema, solo en Windows
 pystray>=0.19; sys_platform == "win32"
 pillow>=10; sys_platform == "win32"
