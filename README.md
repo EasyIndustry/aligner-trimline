@@ -30,7 +30,8 @@ instala con `AlignerTrimlineSetup-<versión>.exe`, que sale de cada release.
    keyframes.
 6. **Exportar.** `<ID>.pts` con todas las curvas, `<ID> PC.pts` con los puntos de control y
    `<ID>.curva` con los datos del caso (un JSON), igual que los que ya consume el generador del KUKA.
-   El navegador pregunta en qué carpeta dejarlos.
+   Los escribe el programa en la carpeta elegida ("Elegir carpeta…" abre el diálogo del
+   sistema; si ya hay archivos con ese nombre, pregunta antes de reemplazarlos).
 7. **Guardar.** `<ID>.trimline` es una foto entera del trabajo: puntos, keyframes, ajustes, la
    vista y las mallas ya procesadas. Abrirlo deja todo como estaba, sin volver a arrastrar
    los STL. Los `.trimline.json` de antes también se abren (las mallas sí hay que arrastrarlas).
@@ -69,11 +70,16 @@ Se trabaja de a un maxilar por vez, y antes de empezar se elige qué movimientos
   traen con `tools/vendorizar.sh <render|sdk|materiales> <etiqueta>`.
 - **Exportación**: cada formato es un módulo en `server/trimline/exportar/` que se registra
   con `@exportador`. Hoy: `pts` (un archivo con todo) y `pts-por-curva`.
-- **Lanzador** (`lanzador.py`): levanta el servidor y abre el navegador; si ya está abierto,
-  solo abre la pestaña. El servidor se apaga solo cuando la pestaña lleva un rato cerrada.
+- **Lanzador** (`lanzador.py`): levanta el servidor en el primer puerto libre desde el 8000 y
+  abre el navegador; si ya está abierto, solo abre la pestaña. En Windows deja un ícono en la
+  bandeja del sistema para volver a la pestaña o cerrar el programa. El servidor también se
+  apaga solo cuando la pestaña lleva un rato cerrada.
+- **Ícono**: `tools/icono.py` dibuja `web/icono.ico` y `web/icono.png` (necesita Pillow).
 - **Instalador y actualizaciones** (`packaging/`, `.github/workflows/release.yml`): publicar un
   release arma el `.exe` de Windows y lo cuelga del release. Desde el programa se puede ver qué
   releases hay, instalar uno y volver al anterior.
+  Consulta GitHub sin cuenta; si la API no responde (por ejemplo, por el límite de
+  pedidos de una red compartida), usa la página pública de releases.
 
 Pruebas: `.venv/bin/python -m pytest`.
 

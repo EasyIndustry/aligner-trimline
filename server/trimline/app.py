@@ -18,7 +18,7 @@ from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
-from . import __version__, actualizar, curva, mallas, nombres, proyecto, snapshot
+from . import __version__, actualizar, curva, dialogos, mallas, nombres, proyecto, snapshot
 from .exportar import EXPORTADORES, ORDEN_MAXILARES, exportar
 
 WEB = Path(os.environ.get("TRIMLINE_WEB") or Path(__file__).resolve().parents[2] / "web")
@@ -152,11 +152,38 @@ def exportar_trabajo(cuerpo: dict) -> dict:
         archivos = exportar(cuerpo.get("formato") or "pts", trabajo, cuerpo.get("opciones"))
     except (KeyError, ValueError, StopIteration) as e:
         raise _error(e) from None
+    if cuerpo.get("carpeta"):
+        return _escribir(Path(str(cuerpo["carpeta"])).expanduser(), archivos, bool(cuerpo.get("pisar")))
     # un archivo con otra codificación que UTF-8 viaja ya en bytes (base64), tal cual va al disco
     for f in archivos:
         if f.get("codificacion"):
             f["datos"] = base64.b64encode(f.pop("texto").encode(f.pop("codificacion"), errors="replace")).decode()
     return {"archivos": archivos}
+
+
+def _escribir(carpeta: Path, archivos: list[dict], pisar: bool) -> dict:
+    """Deja los archivos exportados en la carpeta. Sin `pisar`, si ya hay alguno no escribe nada (409)."""
+    if not carpeta.is_dir():
+        raise HTTPException(status_code=422, detail=f"no existe la carpeta {carpeta}")
+    ya = [f["nombre"] for f in archivos if (carpeta / f["nombre"]).exists()]
+    if ya and not pisar:
+        raise HTTPException(status_code=409, detail=f"ya existen en esa carpeta: {', '.join(ya)}")
+    try:
+        for f in archivos:
+            # bytes tal cual: el texto ya trae sus saltos CRLF
+            (carpeta / f["nombre"]).write_bytes(f["texto"].encode(f.get("codificacion") or "utf-8", errors="replace"))
+    except OSError as e:
+        raise HTTPException(status_code=422, detail=f"no se pudo escribir en {carpeta}: {e.strerror or e}") from None
+    return {"carpeta": str(carpeta), "archivos": [{"nombre": f["nombre"]} for f in archivos]}
+
+
+@app.post("/api/carpeta/elegir")
+def elegir_carpeta(cuerpo: dict) -> dict:
+    """Abre el diálogo de carpetas del sistema (en la máquina del servidor, que es esta)."""
+    try:
+        return {"carpeta": dialogos.elegir_carpeta(cuerpo.get("inicial"), cuerpo.get("titulo") or "Elegí la carpeta")}
+    except (dialogos.SinDialogo, OSError) as e:
+        raise HTTPException(status_code=422, detail=str(e)) from None
 
 
 @app.post("/api/latido")

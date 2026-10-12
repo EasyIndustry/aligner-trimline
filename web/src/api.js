@@ -4,7 +4,7 @@ async function json(respuesta) {
   if (respuesta.ok) return respuesta.json();
   let detalle = respuesta.statusText;
   try { detalle = (await respuesta.json()).detail ?? detalle; } catch { /* no era JSON */ }
-  throw new Error(detalle);
+  throw Object.assign(new Error(detalle), { status: respuesta.status });
 }
 
 const enviar = (ruta, cuerpo) => fetch(ruta, {
@@ -30,7 +30,10 @@ export async function bajarMalla(id) {
 
 export const resolver = (maxilar, nums, n = 300) => enviar('/api/resolver', { maxilar, nums, n });
 export const exportadores = () => fetch('/api/exportadores').then(json);
+/** Exporta; con `carpeta` el servidor escribe ahí los archivos (409 si ya hay y no se pidió `pisar`). */
 export const exportar = (cuerpo) => enviar('/api/exportar', cuerpo);
+/** El diálogo de carpetas del sistema: { carpeta } o { carpeta: null } si se canceló. */
+export const elegirCarpeta = (inicial, titulo) => enviar('/api/carpeta/elegir', { inicial, titulo });
 export const latido = () => enviar('/api/latido').catch(() => {});
 export const cerrar = () => enviar('/api/cerrar');
 export const actualizacion = (buscar = false) => fetch(`/api/actualizacion?buscar=${buscar}`).then(json);

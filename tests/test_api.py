@@ -85,3 +85,22 @@ def test_guardar_y_abrir_curva(domo_stl):
     assert np.array_equal(antes.v, despues.v) and np.array_equal(antes.f, despues.f)
     assert np.allclose(antes.arriba, despues.arriba)
     assert cliente.post("/api/trabajo/abrir", content=b"cualquier cosa").status_code == 422
+
+
+def test_exportar_a_una_carpeta(domo_stl, tmp_path):
+    m = cliente.post("/api/mallas", params={"nombre": "BN595 Caso Prueba 2.0 BIS Sup 01 CNC3.stl"}, content=domo_stl).json()
+    maxilar = {"movimientos": [{"num": "01", "malla": m["id"]}], "controladores": anillo(num="01")}
+    pedido = {"id": "BN595", "maxilares": {"sup": maxilar}, "carpeta": str(tmp_path)}
+    r = cliente.post("/api/exportar", json=pedido)
+    assert r.status_code == 200, r.text
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["BN595 PC.pts", "BN595.curva", "BN595.pts"]
+    assert (tmp_path / "BN595.pts").read_bytes().startswith(b"sup 01\r\n")
+    assert (tmp_path / "BN595.curva").read_bytes().decode("latin-1").startswith('{"referencia": ')
+    # una segunda vez no pisa sin permiso
+    (tmp_path / "BN595.pts").write_text("viejo")
+    r = cliente.post("/api/exportar", json=pedido)
+    assert r.status_code == 409 and "BN595.pts" in r.json()["detail"]
+    assert (tmp_path / "BN595.pts").read_text() == "viejo"
+    assert cliente.post("/api/exportar", json={**pedido, "pisar": True}).status_code == 200
+    assert (tmp_path / "BN595.pts").read_text() != "viejo"
+    assert cliente.post("/api/exportar", json={**pedido, "carpeta": str(tmp_path / "no-existe")}).status_code == 422

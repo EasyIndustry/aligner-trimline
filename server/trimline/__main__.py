@@ -1,4 +1,4 @@
-"""python -m trimline [--port 8790] [--host 127.0.0.1] [--abrir] [--autocierre SEGUNDOS]"""
+"""python -m trimline [--port 8000] [--host 127.0.0.1] [--abrir] [--autocierre SEGUNDOS]"""
 from __future__ import annotations
 
 import argparse
@@ -12,7 +12,7 @@ from . import app as modulo
 
 def main(argv: list[str] | None = None) -> None:
     ap = argparse.ArgumentParser(prog="trimline")
-    ap.add_argument("--port", type=int, default=8790)
+    ap.add_argument("--port", type=int, default=8000)
     ap.add_argument("--host", default="127.0.0.1")
     ap.add_argument("--abrir", action="store_true", help="abrir el navegador al arrancar")
     ap.add_argument("--autocierre", type=float, default=0, help="apagarse tras N segundos sin la interfaz abierta")

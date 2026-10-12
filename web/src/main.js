@@ -547,29 +547,46 @@ function bajar(nombre, contenido, tipo = 'text/plain') {
 const idCaso = () => /** @type {HTMLInputElement} */ ($('caso')).value.trim() || 'caso';
 const elegirDonde = 'showSaveFilePicker' in window;
 
-// Exportar: los .pts para la máquina. Primero se elige la carpeta (el navegador solo deja abrir
-// el selector justo después del clic), después se calculan las curvas.
+// Exportar: los .pts para la máquina. Los escribe el servidor en la carpeta elegida: el
+// selector del navegador no deja elegir carpetas "del sistema" (Escritorio, Descargas...).
+const campoCarpeta = /** @type {HTMLInputElement} */ ($('carpeta'));
+try { campoCarpeta.value = localStorage.getItem('trimline.carpeta') ?? ''; } catch { /* sin almacenamiento */ }
+function ponerCarpeta(carpeta) {
+  campoCarpeta.value = carpeta ?? '';
+  campoCarpeta.title = campoCarpeta.value;
+  try { localStorage.setItem('trimline.carpeta', campoCarpeta.value); } catch { /* idem */ }
+}
+campoCarpeta.addEventListener('change', () => ponerCarpeta(campoCarpeta.value.trim()));
+ponerCarpeta(campoCarpeta.value);
+
+async function elegirCarpeta() {
+  avisar('Elegí la carpeta en la ventana que se abrió…');
+  try {
+    const { carpeta } = await api.elegirCarpeta(campoCarpeta.value.trim() || null, 'Carpeta donde exportar');
+    avisar('');
+    if (carpeta) ponerCarpeta(carpeta);
+    return carpeta;
+  } catch (e) { avisar(e.message, true); return null; }
+}
+$('elegir-carpeta').addEventListener('click', elegirCarpeta);
+
 $('exportar').addEventListener('click', async () => {
-  let carpeta = null;
-  if ('showDirectoryPicker' in window) {
-    try { carpeta = await /** @type {any} */ (window).showDirectoryPicker({ id: 'exportar', mode: 'readwrite' }); }
-    catch (e) { if (e.name === 'AbortError') return; }
-  }
+  const carpeta = campoCarpeta.value.trim() || await elegirCarpeta();
+  if (!carpeta) return;
+  const pedido = {
+    id: idCaso(), formato: /** @type {HTMLSelectElement} */ ($('formato')).value,
+    n: Number(/** @type {HTMLInputElement} */ ($('puntos')).value) || 300, carpeta,
+    maxilares: Object.fromEntries(Object.keys(MAXILARES).filter((m) => movimientos(m).length && estado.maxilares[m].controladores.length).map((m) => [m, paraServidor(m)])),
+  };
   try {
     avisar('Exportando…');
-    const maxilares = Object.fromEntries(Object.keys(MAXILARES).filter((m) => movimientos(m).length && estado.maxilares[m].controladores.length).map((m) => [m, paraServidor(m)]));
-    const r = await api.exportar({
-      id: idCaso(), formato: /** @type {HTMLSelectElement} */ ($('formato')).value,
-      n: Number(/** @type {HTMLInputElement} */ ($('puntos')).value) || 300, maxilares,
-    });
-    for (const f of r.archivos) {
-      // los que no son UTF-8 (el .json va en Latin-1) llegan ya en bytes
-      const contenido = f.datos ? new Blob([Uint8Array.from(atob(f.datos), (ch) => ch.charCodeAt(0))]) : f.texto;
-      if (!carpeta) { bajar(f.nombre, contenido); continue; }
-      const w = await (await carpeta.getFileHandle(f.nombre, { create: true })).createWritable();
-      await w.write(contenido); await w.close();
+    let r;
+    try { r = await api.exportar(pedido); } catch (e) {
+      if (e.status !== 409) throw e;
+      if (!confirm(`${e.message[0].toUpperCase()}${e.message.slice(1)}.\n¿Reemplazarlos?`)) { avisar(''); return; }
+      r = await api.exportar({ ...pedido, pisar: true });
     }
-    avisar(`Exportado: ${r.archivos.map((f) => f.nombre).join(', ')}`);
+    avisar(`Exportado en ${r.carpeta}: ${r.archivos.map((f) => f.nombre).join(', ')}`);
   } catch (e) { avisar(e.message, true); }
 });
 
@@ -591,7 +608,7 @@ $('guardar').addEventListener('click', async () => {
       archivos: estado.archivos.map(({ malla, nombre, maxilar, mov, usar }) => ({ malla, nombre, maxilar, mov, usar })),
       maxilares: estado.maxilares,
       vista: { maxilar: estado.maxilar, num: estado.num, modo: estado.modo },
-      exportar: { formato: /** @type {HTMLSelectElement} */ ($('formato')).value, n: Number(/** @type {HTMLInputElement} */ ($('puntos')).value) || 300 },
+      exportar: { formato: /** @type {HTMLSelectElement} */ ($('formato')).value, n: Number(/** @type {HTMLInputElement} */ ($('puntos')).value) || 300, carpeta: campoCarpeta.value.trim() },
     });
     if (destino) {
       const w = await destino.createWritable();
@@ -632,6 +649,7 @@ async function abrirTrabajo(archivo) {
   pendientes = [];
   /** @type {HTMLInputElement} */ ($('caso')).value = t.id ?? '';
   if (t.exportar?.n) /** @type {HTMLInputElement} */ ($('puntos')).value = String(t.exportar.n);
+  if (t.exportar?.carpeta) ponerCarpeta(t.exportar.carpeta);
   if (t.exportar?.formato && [...$('formato').querySelectorAll('option')].some((o) => o.value === t.exportar.formato)) {
     /** @type {HTMLSelectElement} */ ($('formato')).value = t.exportar.formato;
   }

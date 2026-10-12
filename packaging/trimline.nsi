@@ -6,6 +6,9 @@ SetCompressor /SOLID lzma
 
 !define NOMBRE "Aligner Trimline"
 !define CLAVE_REG "Software\Microsoft\Windows\CurrentVersion\Uninstall\AlignerTrimline"
+; el ícono sale de tools/icono.py y viaja con la app
+!define MUI_ICON "${CARGA}\app\web\icono.ico"
+!define MUI_UNICON "${CARGA}\app\web\icono.ico"
 
 Name "${NOMBRE} ${VERSION}"
 OutFile "${SALIDA}"
@@ -34,7 +37,7 @@ FunctionEnd
 
 Function AccesoEscritorio
   SetOutPath "$INSTDIR"
-  CreateShortCut "$DESKTOP\${NOMBRE}.lnk" "$INSTDIR\runtime\AlignerTrimline.exe" '"$INSTDIR\app\lanzador.py"'
+  CreateShortCut "$DESKTOP\${NOMBRE}.lnk" "$INSTDIR\runtime\AlignerTrimline.exe" '"$INSTDIR\app\lanzador.py"' "$INSTDIR\app\web\icono.ico" 0
 FunctionEnd
 
 Section "Programa"
@@ -46,11 +49,12 @@ Section "Programa"
   File /r "${CARGA}\*.*"
 
   CreateDirectory "$SMPROGRAMS\${NOMBRE}"
-  CreateShortCut "$SMPROGRAMS\${NOMBRE}\${NOMBRE}.lnk" "$INSTDIR\runtime\AlignerTrimline.exe" '"$INSTDIR\app\lanzador.py"'
+  CreateShortCut "$SMPROGRAMS\${NOMBRE}\${NOMBRE}.lnk" "$INSTDIR\runtime\AlignerTrimline.exe" '"$INSTDIR\app\lanzador.py"' "$INSTDIR\app\web\icono.ico" 0
   CreateShortCut "$SMPROGRAMS\${NOMBRE}\Desinstalar.lnk" "$INSTDIR\Desinstalar.exe"
 
   WriteRegStr HKCU "${CLAVE_REG}" "DisplayName" "${NOMBRE}"
   WriteRegStr HKCU "${CLAVE_REG}" "DisplayVersion" "${VERSION}"
+  WriteRegStr HKCU "${CLAVE_REG}" "DisplayIcon" "$INSTDIR\app\web\icono.ico"
   WriteRegStr HKCU "${CLAVE_REG}" "InstallLocation" "$INSTDIR"
   WriteRegStr HKCU "${CLAVE_REG}" "UninstallString" '"$INSTDIR\Desinstalar.exe"'
   WriteRegDWORD HKCU "${CLAVE_REG}" "NoModify" 1
