@@ -20,6 +20,7 @@ BUILD="$RAIZ/packaging/build"
 CARGA="$BUILD/carga"
 PY_VERSION="3.12"
 MAKENSIS="${MAKENSIS:-makensis}"
+PYTHON="${PYTHON:-python3}"            # el Python del que arma: necesita pip y packaging
 
 # Las versiones exactas que viajan en el instalador. requirements.txt dice qué hace falta;
 # acá se fija con cuál se prueba.
@@ -34,7 +35,7 @@ echo "== intérprete"
 API="https://api.github.com/repos/astral-sh/python-build-standalone/releases/latest"
 AUTH=()
 [[ -n "${GITHUB_TOKEN:-}" ]] && AUTH=(-H "Authorization: Bearer $GITHUB_TOKEN")
-URL="$(curl -fsSL "${AUTH[@]}" "$API" | python3 -c "
+URL="$(curl -fsSL "${AUTH[@]}" "$API" | "$PYTHON" -c "
 import json, sys
 for a in json.load(sys.stdin)['assets']:
     n = a['name']
@@ -55,12 +56,12 @@ cp "$CARGA/runtime/pythonw.exe" "$CARGA/runtime/AlignerTrimline.exe"
 
 echo "== librerías"
 SITE="$CARGA/runtime/Lib/site-packages"
-PYTHONNOUSERSITE=1 python3 -m pip install "${PAQUETES[@]}" \
+PYTHONNOUSERSITE=1 "$PYTHON" -m pip install "${PAQUETES[@]}" \
   --target "$SITE" --platform win_amd64 --python-version "$PY_VERSION" --only-binary=:all: \
   --upgrade -q --no-warn-conflicts
 
 # pip con --platform no revisa que el árbol quede completo para Windows: se revisa acá
-python3 - "$SITE" <<'PY'
+"$PYTHON" - "$SITE" <<'PY'
 import sys
 from importlib.metadata import distributions
 from packaging.requirements import Requirement
