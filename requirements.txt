@@ -1,0 +1,7 @@
+# Lo que necesita el servidor. Las versiones exactas que van al instalador de Windows están
+# en packaging/build_win.sh: si cambiás algo acá, cambialo allá.
+fastapi>=0.115
+uvicorn>=0.32
+numpy>=2.0
+scipy>=1.13
+trimesh>=4.5

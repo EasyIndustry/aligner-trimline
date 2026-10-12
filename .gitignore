@@ -17,3 +17,6 @@ node_modules/
 *.src
 casos/
 data/
+web/_prueba/
+packaging/build/
+.pytest_cache/

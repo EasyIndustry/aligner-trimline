@@ -4,7 +4,34 @@ Editor de **líneas de recorte de alineadores dentales**. Sobre el modelo 3D de 
 usuario define la curva por donde se corta el alineador termoformado, y el programa la exporta
 para la máquina que hace el corte.
 
-> Estado: en definición. Todavía no hay código; este README describe lo acordado.
+> Estado: primera etapa funcionando. Falta probar el instalador en un Windows real.
+
+## Usarlo
+
+En Linux, desde una copia del repo:
+
+```
+./trimline.sh
+```
+
+Arma el entorno la primera vez, levanta el servidor local y abre el navegador. En Windows se
+instala con `AlignerTrimlineSetup-<versión>.exe`, que sale de cada release.
+
+1. **Modelos.** Arrastrá los STL. El nombre dice el maxilar y el movimiento
+   (`0044 Apellido Nombre 1.0 sup 01.stl`); lo que no se reconoce se corrige en la tabla.
+   Destildá los movimientos que no se usan: el primero tildado de cada maxilar es la base.
+2. **Maxilar.** Se trabaja de a uno.
+3. **Puntos.** En el movimiento base: modo vestibular y un clic en la encía debajo de cada
+   diente; modo lingual y lo mismo del otro lado; modo extremos y un clic en cada punta.
+4. **Ajuste.** Los deslizadores del visor mueven el offset, el festoneado y el ancho de los
+   festones. Con un punto elegido aparecen sus dos manijas: arrastrarlas ajusta ese festón.
+5. **Movimientos.** Arrastrá el cursor de la línea de tiempo. Si en un movimiento la curva
+   quedó corrida, mové el punto: queda un keyframe ahí y la curva avanza de a poco entre
+   keyframes.
+6. **Exportar.** `<ID>.pts` con todas las curvas y `<ID>_PC.pts` con los puntos de control.
+
+Mouse: clic izquierdo marca y mueve; clic derecho orbita; shift + clic derecho desplaza; la
+rueda hace zoom.
 
 ## La idea
 
@@ -23,12 +50,25 @@ Se trabaja de a un maxilar por vez, y antes de empezar se elige qué movimientos
 
 ## Arquitectura
 
-- **Motor**: Python, solo mallas. Es el dueño de la curva: la genera, la suaviza y la exporta.
-  Corre como servidor local en una PC o en un servidor aparte.
-- **Interfaz**: el navegador, con three.js. Se ocupa de mostrar el modelo y de la interacción
-  (rayo del mouse, arrastre de controladores, línea de tiempo de movimientos).
-- **Exportación**: modular. El primer formato es `.pts`, con los puntos de cada curva por maxilar
-  y movimiento.
+- **Motor** (`server/trimline/`): Python con FastAPI y trimesh, solo mallas. Es el dueño de la
+  curva: la genera (`curva.py`), resuelve los keyframes (`proyecto.py`) y la exporta
+  (`exportar/`). La malla se suelda una vez y el navegador recibe los mismos vértices e
+  índices; durante la edición solo viaja la curva.
+- **Interfaz** (`web/`): three.js sin build. Hace lo liviano: el rayo del mouse, el arrastre y
+  el dibujo. La línea de tiempo y los deslizadores (`src/hud.js`) están dibujados en el visor,
+  fijos a la pantalla.
+- **Motores vendorizados** (`web/vendor/`): threejs-render-engine, threejs-material-engine y
+  threejs-cad-sdk, más three y three-mesh-bvh para que ande sin internet. No se editan: se
+  traen con `tools/vendorizar.sh <render|sdk|materiales> <etiqueta>`.
+- **Exportación**: cada formato es un módulo en `server/trimline/exportar/` que se registra
+  con `@exportador`. Hoy: `pts` (un archivo con todo) y `pts-por-curva`.
+- **Lanzador** (`lanzador.py`): levanta el servidor y abre el navegador; si ya está abierto,
+  solo abre la pestaña. El servidor se apaga solo cuando la pestaña lleva un rato cerrada.
+- **Instalador y actualizaciones** (`packaging/`, `.github/workflows/release.yml`): publicar un
+  release arma el `.exe` de Windows y lo cuelga del release. Desde el programa se puede ver qué
+  releases hay, instalar uno y volver al anterior.
+
+Pruebas: `.venv/bin/python -m pytest`.
 
 ## Datos
 

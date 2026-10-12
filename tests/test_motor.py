@@ -1,0 +1,148 @@
+import numpy as np
+import pytest
+
+from conftest import anillo
+from trimline import curva, mallas, nombres, proyecto
+from trimline.exportar import EXPORTADORES, exportar
+
+
+@pytest.fixture()
+def malla(domo_stl):
+    return mallas.cargar(domo_stl, "domo.stl")
+
+
+def maxilar(malla, **extra):
+    return {"movimientos": [{"num": n, "malla": malla.id} for n in ("00", "01", "02", "03", "04")],
+            "offset": 0.0, "amplitud": 0.0, "controladores": anillo(), **extra}
+
+
+def test_nombres():
+    a = nombres.interpretar("0044 Reale Leandro 1.0 sup 01.stl")
+    assert (a["id"], a["etapa"], a["maxilar"], a["movimiento"]) == ("0044", "1.0", "sup", "01")
+    b = nombres.interpretar("00009 Caso Prueba 2.1 Inf 3 CNC2.stl")
+    assert (b["maxilar"], b["movimiento"], b["sufijo"]) == ("inf", "03", "CNC2")
+    c = nombres.interpretar("28-07-2022_16-29-03_Subsetup10_Mandibular.stl")
+    assert (c["maxilar"], c["movimiento"]) == ("inf", "10")
+    assert nombres.interpretar("cualquiera.stl")["maxilar"] is None
+
+
+def test_base_y_malla_soldada(malla):
+    assert np.allclose(malla.arriba, [0, 0, 1], atol=1e-6)
+    assert abs(malla.base) < 1e-6
+    assert len(malla.v) < len(malla.f)                 # soldada: menos vértices que caras
+    cab = np.frombuffer(malla.binario()[:8], dtype="<u4")
+    assert list(cab) == [len(malla.v), len(malla.f)]
+    assert len(malla.binario()) == 8 + len(malla.v) * 12 + len(malla.f) * 12
+
+
+def test_mas_cercano_cae_en_la_superficie(malla):
+    p = np.array([[0, 0, 30.0], [30, 0, 5], [5, 5, 50]])
+    q = malla.mas_cercano(p)
+    assert np.allclose(np.linalg.norm(q, axis=1), 20, atol=0.05)
+
+
+def test_curva_cerrada_y_ordenada(malla):
+    r = proyecto.resolver(maxilar(malla), "00", n=500)
+    assert r["cerrada"] and len(r["tramos"]) == 1
+    t = r["tramos"][0]
+    assert t["puntos"].shape == (500, 3)
+    assert np.abs(np.linalg.norm(t["puntos"], axis=1) - 20).max() < 0.05      # apoyada en la malla
+    tipos = "".join(i["tipo"] if i["clase"] == "cresta" else "." for i in t["info"])
+    assert tipos == "e" + ".".join("v" * 8) + "e" + ".".join("l" * 8)          # E1, vestibulares, E2, linguales
+    paso = np.linalg.norm(np.diff(np.vstack([t["puntos"], t["puntos"][0]]), axis=0), axis=1)
+    assert paso.max() / paso.mean() < 1.6                                       # repartida a distancia pareja
+
+
+def test_el_orden_no_depende_de_los_clics(malla):
+    a = maxilar(malla)
+    b = maxilar(malla, controladores=list(reversed(anillo())))
+    pa = proyecto.resolver(a, "00")["tramos"][0]["puntos"]
+    pb = proyecto.resolver(b, "00")["tramos"][0]["puntos"]
+    assert np.allclose(pa, pb, atol=1e-6)
+
+
+def test_sin_extremos_queda_abierta(malla):
+    m = maxilar(malla, controladores=[c for c in anillo() if c["tipo"] != "e"])
+    r = proyecto.resolver(m, "00")
+    assert not r["cerrada"] and len(r["tramos"]) == 2
+
+
+def test_amplitud_mueve_solo_las_crestas_inversas(malla):
+    plano = proyecto.resolver(maxilar(malla), "00")["tramos"][0]
+    festo = proyecto.resolver(maxilar(malla, amplitud=3.0), "00")["tramos"][0]
+    for info, a, b in zip(plano["info"], plano["claves"], festo["claves"]):
+        if info["clase"] == "cresta":
+            assert np.allclose(a, b, atol=1e-9)
+        elif info["tipo"] == "v":
+            assert b[2] > a[2] + 0.5                   # la cresta inversa subió hacia la corona
+
+
+def test_offset_mueve_todo(malla):
+    a = proyecto.resolver(maxilar(malla), "00")["tramos"][0]["claves"]
+    b = proyecto.resolver(maxilar(malla, offset=2.0), "00")["tramos"][0]["claves"]
+    assert (b[:, 2] > a[:, 2] + 0.3).all()
+
+
+def test_keyframes_absolutos_e_interpolados(malla):
+    m = maxilar(malla)
+    c = m["controladores"][0]
+    p0 = np.array(c["claves"]["00"])
+    c["claves"]["04"] = (p0 + [0, 0, 4.0]).tolist()
+    nums = ["00", "01", "02", "03", "04"]
+    assert np.allclose(proyecto.posicion(c, nums, "02"), p0 + [0, 0, 2.0])     # a mitad de camino
+    assert np.allclose(proyecto.posicion(c, nums, "01"), p0 + [0, 0, 1.0])
+    # corregir el 00 no toca el 04: solo cambia la transición
+    c["claves"]["00"] = (p0 + [0, 0, -2.0]).tolist()
+    assert np.allclose(proyecto.posicion(c, nums, "04"), p0 + [0, 0, 4.0])
+    assert np.allclose(proyecto.posicion(c, nums, "02"), p0 + [0, 0, 1.0])
+    # después del último keyframe se queda quieto; un movimiento omitido no cuenta
+    c["claves"] = {"00": p0.tolist(), "02": (p0 + [0, 0, 2.0]).tolist()}
+    assert np.allclose(proyecto.posicion(c, nums, "04"), p0 + [0, 0, 2.0])
+    assert np.allclose(proyecto.posicion(c, ["00", "01", "03", "04"], "04"), p0)
+    assert proyecto.con_keyframe(m) == ["00", "02"]
+
+
+def test_exportar_pts(malla):
+    assert {"pts", "pts-por-curva"} <= set(EXPORTADORES)
+    m = maxilar(malla)
+    m["controladores"][0]["claves"]["03"] = m["controladores"][0]["claves"]["00"]
+    movs = []
+    for mov in m["movimientos"]:
+        r = proyecto.resolver(m, mov["num"], n=50)
+        movs.append({"num": mov["num"], "cerrada": True, "curva": r["tramos"][0]["puntos"],
+                     "controladores": r["controladores"], "tiene_clave": mov["num"] in proyecto.con_keyframe(m)})
+    trabajo = {"id": "0044", "maxilares": {"sup": movs, "inf": movs[:2]}}
+    curvas, control = exportar("pts", trabajo)
+    assert (curvas["nombre"], control["nombre"]) == ("0044.pts", "0044_PC.pts")
+    lineas = curvas["texto"].split("\r\n")
+    assert lineas[-1] == "" and lineas[0] == "inf 00" and lineas[51] == "inf 01"   # inferior primero, 50 puntos
+    assert [x for x in lineas if x[:3] in ("inf", "sup")] == ["inf 00", "inf 01", "sup 00", "sup 01", "sup 02", "sup 03", "sup 04"]
+    assert all(len(x.split()) == 3 and all(len(n.split(".")[1]) == 4 for n in x.split()) for x in lineas[1:51])
+    assert "-0.0000" not in curvas["texto"]
+    assert [x for x in control["texto"].split("\r\n") if x[:3] in ("inf", "sup")] == ["inf 00", "sup 00", "sup 03"]
+    sueltos = exportar("pts-por-curva", trabajo)
+    assert [f["nombre"] for f in sueltos][:3] == ["0044_inf_00.pts", "0044_inf_01.pts", "0044_sup_00.pts"]
+    assert len(sueltos[0]["texto"].strip().split("\r\n")) == 50
+    assert len(exportar("pts", trabajo, {"decimales": 3})[0]["texto"].split("\r\n")[1].split()[0].split(".")[1]) == 3
+
+
+def test_bezier_tangentes_planas_y_ancho(malla):
+    m = maxilar(malla, amplitud=2.0)
+    t = proyecto.resolver(m, "00")["tramos"][0]
+    for k, hs in zip(t["claves"], t["manijas"]):
+        assert abs((hs[0] - k) @ malla.arriba) < 1e-9 and abs((hs[1] - k) @ malla.arriba) < 1e-9   # planas
+    largo = lambda tr, clase: np.mean([np.linalg.norm(h[1] - k) for i, k, h in zip(tr["info"], tr["claves"], tr["manijas"]) if i["clase"] == clase and i["tipo"] == "v"])
+    ancha = proyecto.resolver({**m, "ancho": 0.6}, "00")["tramos"][0]
+    assert largo(ancha, "cresta") > largo(t, "cresta") and largo(ancha, "inversa") < largo(t, "inversa")
+    assert not np.allclose(ancha["puntos"], t["puntos"], atol=1e-3)
+
+
+def test_manija_puesta_a_mano(malla):
+    m = maxilar(malla, amplitud=2.0)
+    antes = proyecto.resolver(m, "00")["tramos"][0]
+    m["controladores"][3]["manijas"] = {"b": [0.0, 0.0, 3.0]}
+    r = proyecto.resolver(m, "00")["tramos"][0]
+    i = next(k for k, info in enumerate(r["info"]) if info.get("id") == "v3")
+    assert np.allclose(r["manijas"][i, 1] - r["claves"][i], [0, 0, 3.0])       # la puesta a mano
+    assert np.allclose(r["manijas"][i, 0], antes["manijas"][i, 0])             # la otra sigue calculada
+    assert not np.allclose(r["puntos"], antes["puntos"], atol=1e-3)
