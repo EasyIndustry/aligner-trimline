@@ -4,7 +4,7 @@ Editor de **líneas de recorte de alineadores dentales**. Sobre el modelo 3D de 
 usuario define la curva por donde se corta el alineador termoformado, y el programa la exporta
 para la máquina que hace el corte.
 
-> Estado: primera etapa funcionando. Falta probar el instalador en un Windows real.
+> Estado: primera etapa funcionando, con el instalador probado en Windows.
 
 ## Usarlo
 
