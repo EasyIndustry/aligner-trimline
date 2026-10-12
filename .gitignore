@@ -1,0 +1,19 @@
+# entorno
+.venv/
+__pycache__/
+node_modules/
+.DS_Store
+
+# archivos auxiliares de sesiones de Claude
+.claude/scratch/
+
+# datos de pacientes: mallas, proyectos y exportaciones nunca van al repo
+*.stl
+*.ply
+*.obj
+*.3dm
+*.pts
+*.dxf
+*.src
+casos/
+data/
