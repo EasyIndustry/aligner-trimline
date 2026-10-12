@@ -15,7 +15,9 @@ Todos reciben lo mismo, ya resuelto y sin depender de cómo se dibujó:
       },
     }
 
-y devuelven una lista de archivos [{"nombre": str, "texto": str}]. Para sumar un formato:
+(más "datos": lo que dice el nombre de los STL, ver nombres.interpretar) y devuelven una lista
+de archivos [{"nombre": str, "texto": str, "codificacion"?: str}] (sin codificación: UTF-8).
+Para sumar un formato:
 un módulo nuevo con una función decorada con @exportador, e importarlo al final de este archivo.
 """
 from __future__ import annotations

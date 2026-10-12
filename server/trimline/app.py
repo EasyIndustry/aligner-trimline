@@ -5,6 +5,7 @@ la generación de la curva, los keyframes y la exportación.
 """
 from __future__ import annotations
 
+import base64
 import os
 import subprocess
 import sys
@@ -17,7 +18,7 @@ from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
-from . import __version__, actualizar, mallas, nombres, proyecto
+from . import __version__, actualizar, curva, mallas, nombres, proyecto, snapshot
 from .exportar import EXPORTADORES, ORDEN_MAXILARES, exportar
 
 WEB = Path(os.environ.get("TRIMLINE_WEB") or Path(__file__).resolve().parents[2] / "web")
@@ -92,6 +93,25 @@ def resolver(cuerpo: dict) -> dict:
         raise _error(e) from None
 
 
+@app.post("/api/trabajo/guardar")
+def guardar_trabajo(cuerpo: dict) -> Response:
+    """El trabajo entero, con sus mallas, como un archivo .trimline."""
+    try:
+        return Response(snapshot.guardar(cuerpo), media_type="application/zip")
+    except KeyError as e:
+        raise _error(e) from None
+
+
+@app.post("/api/trabajo/abrir")
+async def abrir_trabajo(request: Request) -> dict:
+    """Recibe un .trimline (cuerpo crudo), deja sus mallas cargadas y devuelve el trabajo."""
+    try:
+        trabajo = snapshot.abrir(await request.body())
+    except (KeyError, ValueError) as e:
+        raise HTTPException(status_code=422, detail=f"no se pudo abrir: {str(e).strip(chr(39))}") from None
+    return {"trabajo": trabajo, "mallas": [mallas.obtener(a["malla"]).resumen() for a in trabajo.get("archivos", [])]}
+
+
 @app.get("/api/exportadores")
 def exportadores() -> dict:
     return {"exportadores": [{k: v for k, v in e.items() if k != "fn"} for e in EXPORTADORES.values()]}
@@ -103,7 +123,7 @@ def exportar_trabajo(cuerpo: dict) -> dict:
     n = cuerpo.get("n")
     paso = cuerpo.get("paso")
     if not n and not paso:
-        n = 500
+        n = 300
     trabajo = {"id": str(cuerpo.get("id") or "caso").strip() or "caso", "maxilares": {}}
     try:
         for clave in ORDEN_MAXILARES:
@@ -111,14 +131,18 @@ def exportar_trabajo(cuerpo: dict) -> dict:
             if not maxilar or not maxilar.get("movimientos") or not maxilar.get("controladores"):
                 continue
             con_clave = set(proyecto.con_keyframe(maxilar))
+            if "datos" not in trabajo:
+                trabajo["datos"] = nombres.interpretar(mallas.obtener(maxilar["movimientos"][0]["malla"]).nombre)
             movs = []
             for m in maxilar["movimientos"]:
                 r = proyecto.resolver(maxilar, m["num"], n=int(n) if n else None, paso=float(paso) if paso else None)
                 if not r["cerrada"]:
                     raise ValueError(f"{clave} {m['num']}: la curva no está cerrada (faltan vestibulares, linguales o los dos extremos)")
                 orden = {c["id"]: c for c in r["controladores"]}
+                t = r["tramos"][0]
+                frente = mallas.obtener(m["malla"]).mas_cercano(curva.desde_el_frente(t["puntos"], t["claves"], t["info"]))
                 movs.append({
-                    "num": m["num"], "cerrada": True, "curva": r["tramos"][0]["puntos"],
+                    "num": m["num"], "cerrada": True, "curva": frente,
                     "controladores": [orden[i["id"]] for i in r["tramos"][0]["info"] if i["clase"] == "cresta"],
                     "tiene_clave": m["num"] in con_clave,
                 })
@@ -128,6 +152,10 @@ def exportar_trabajo(cuerpo: dict) -> dict:
         archivos = exportar(cuerpo.get("formato") or "pts", trabajo, cuerpo.get("opciones"))
     except (KeyError, ValueError, StopIteration) as e:
         raise _error(e) from None
+    # un archivo con otra codificación que UTF-8 viaja ya en bytes (base64), tal cual va al disco
+    for f in archivos:
+        if f.get("codificacion"):
+            f["datos"] = base64.b64encode(f.pop("texto").encode(f.pop("codificacion"), errors="replace")).decode()
     return {"archivos": archivos}
 
 

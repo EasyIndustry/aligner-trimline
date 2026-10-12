@@ -31,9 +31,13 @@ def test_flujo_completo(domo_stl):
     assert all(c["clave"] for c in res["01"]["controladores"]) and not any(c["clave"] for c in res["02"]["controladores"])
 
     exp = cliente.post("/api/exportar", json={"id": "0044", "formato": "pts", "n": 500, "maxilares": {"sup": maxilar}}).json()["archivos"]
-    assert [f["nombre"] for f in exp] == ["0044.pts", "0044_PC.pts"]
+    assert [f["nombre"] for f in exp] == ["0044.pts", "0044 PC.pts", "0044.curva"]
     assert exp[0]["texto"].count("\r\n") == 2 * 501
-    assert exp[1]["texto"].startswith("sup 01\r\n") and "sup 02" not in exp[1]["texto"]
+    assert exp[1]["texto"].startswith("sup 01\r\n") and "sup 02" in exp[1]["texto"]       # el primero y el último
+    # el .json viaja en bytes Latin-1, con los datos del nombre del STL
+    import base64, json
+    assert json.loads(base64.b64decode(exp[2]["datos"]).decode("latin-1")) == {
+        "referencia": "", "id": "0044", "nombre": "Caso Prueba 1.0", "etapa": ""}
 
 
 def test_errores_claros(domo_stl):
@@ -63,3 +67,21 @@ def test_los_motores_vendorizados_no_se_editaron():
         for linea in lineas:
             sha, ruta = linea.split(maxsplit=1)
             assert hashlib.sha256((carpeta / ruta.strip()).read_bytes()).hexdigest() == sha, f"{motor}/{ruta} fue modificado"
+
+
+def test_guardar_y_abrir_curva(domo_stl):
+    from trimline import mallas
+    m = cliente.post("/api/mallas", params={"nombre": "0044 Caso Prueba 1.0 sup 01.stl"}, content=domo_stl).json()
+    trabajo = {"id": "0044", "archivos": [{"malla": m["id"], "nombre": "x.stl", "maxilar": "sup", "mov": "01", "usar": True}],
+               "maxilares": {"sup": {"offset": 0.5, "controladores": anillo(num="01"), "inversas": {"v1|v2": [0, 0, 1]}}}}
+    r = cliente.post("/api/trabajo/guardar", json=trabajo)
+    assert r.status_code == 200 and r.content[:2] == b"PK"
+    antes = mallas.obtener(m["id"])
+    mallas.descartar(m["id"])                         # como si el programa se hubiera cerrado
+    a = cliente.post("/api/trabajo/abrir", content=r.content).json()
+    assert a["trabajo"]["maxilares"]["sup"]["inversas"] == {"v1|v2": [0, 0, 1]}
+    assert a["mallas"][0]["id"] == m["id"]
+    despues = mallas.obtener(m["id"])
+    assert np.array_equal(antes.v, despues.v) and np.array_equal(antes.f, despues.f)
+    assert np.allclose(antes.arriba, despues.arriba)
+    assert cliente.post("/api/trabajo/abrir", content=b"cualquier cosa").status_code == 422

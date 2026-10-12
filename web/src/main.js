@@ -150,8 +150,38 @@ function resolverTodo({ soloActual = false } = {}) {
   }, 120);
 }
 
+// ---------- deshacer y rehacer ----------
+// Se guardan fotos de los maxilares (puntos, keyframes, manijas, deslizadores). Un arrastre
+// entero es un solo paso: la foto se toma al empezar y se apila al soltar si algo cambió.
+const historial = { atras: /** @type {string[]} */ ([]), adelante: /** @type {string[]} */ ([]) };
+const foto = () => JSON.stringify(estado.maxilares);
+/** Apila cómo estaba todo antes de un cambio (por defecto, ahora mismo). */
+function recordar(antes = foto()) {
+  if (historial.atras.at(-1) === antes) return;
+  historial.atras.push(antes);
+  if (historial.atras.length > 200) historial.atras.shift();
+  historial.adelante.length = 0;
+}
+function olvidarHistorial() { historial.atras.length = 0; historial.adelante.length = 0; }
+/** Deshace (desde = atras) o rehace (desde = adelante) un paso. */
+function viajar(desde, hacia, texto) {
+  const ahora = foto();
+  while (desde.length && desde.at(-1) === ahora) desde.pop();          // pasos que no cambiaron nada
+  if (!desde.length) { avisar(`No hay nada para ${texto}.`); return; }
+  hacia.push(ahora);
+  estado.maxilares = JSON.parse(/** @type {string} */ (desde.pop()));
+  const max = actual();
+  const ids = new Set(max?.controladores.map((c) => c.id) ?? []);
+  if (estado.seleccion && !esInversa(estado.seleccion) && !ids.has(estado.seleccion)) estado.seleccion = null;
+  estado.elegidos = new Set([...estado.elegidos].filter((id) => ids.has(id)));
+  for (const m of Object.keys(MAXILARES)) curvas[m] = {};
+  pintarPanel(); resolverTodo();
+}
+const deshacer = () => viajar(historial.atras, historial.adelante, 'deshacer');
+const rehacer = () => viajar(historial.adelante, historial.atras, 'rehacer');
+
 // ---------- gestos sobre el visor ----------
-let arrastre = /** @type {{ id: string, movio: boolean, manija?: { lado: string, clave: number[], pos: number[] }, inversa?: { clave: string, desde: number[], previo: number[] } } | null} */ (null);
+let arrastre = /** @type {{ id: string, movio: boolean, antes?: string, manija?: { lado: string, clave: number[], pos: number[] }, inversa?: { clave: string, desde: number[], previo: number[] } } | null} */ (null);
 let ultimoPedido = 0;
 /** Shift + arrastrar en un lugar vacío: el rectángulo que elige muchos puntos de una. */
 let caja = /** @type {{ x0: number, y0: number } | null} */ (null);
@@ -176,7 +206,7 @@ visor.lienzo.addEventListener('pointerdown', (ev) => {
   // primero las manijas del punto elegido: agarrarlas ajusta ese festón a mano
   const manija = estado.seleccion ? visor.manijaEn(x, y) : null;
   if (manija) {
-    arrastre = { id: estado.seleccion, movio: false, manija };
+    arrastre = { id: estado.seleccion, movio: false, manija, antes: foto() };
     return;
   }
   const id = visor.controladorEn(x, y);
@@ -196,7 +226,7 @@ visor.lienzo.addEventListener('pointerdown', (ev) => {
     // agarrar uno que ya estaba elegido no deshace la selección
     if (!estado.elegidos.has(id)) estado.elegidos = esInversa(id) ? new Set() : new Set([id]);
     estado.seleccion = id;
-    arrastre = { id, movio: false };
+    arrastre = { id, movio: false, antes: foto() };
     if (esInversa(id)) {
       const clave = id.slice(2);
       arrastre.inversa = { clave, desde: visor.posicion(id) ?? [0, 0, 0], previo: max.inversas?.[clave] ?? [0, 0, 0] };
@@ -230,6 +260,7 @@ visor.lienzo.addEventListener('pointerdown', (ev) => {
   const aca = Point3d.from(golpe.pos);
   if (max.controladores.some((c) => c.claves[estado.num] && aca.distanceTo(c.claves[estado.num]) < 0.3)) return;
   const nuevo = { id: `c${Date.now().toString(36)}${Math.floor(Math.random() * 1e3)}`, tipo: estado.modo, claves: { [estado.num]: golpe.pos } };
+  recordar();
   max.controladores.push(nuevo);
   estado.seleccion = nuevo.id;
   estado.elegidos = new Set([nuevo.id]);
@@ -241,7 +272,14 @@ visor.lienzo.addEventListener('pointermove', (ev) => {
   const [x, y] = enLienzo(ev);
   if (hud.arrastrando) { hud.mover(x); return; }
   if (caja) { pintarCaja(x, y); return; }
-  if (!arrastre) return;
+  if (!arrastre) {
+    // sin arrastrar: el punto cercano se agranda, para saber que el clic lo agarra
+    if (ev.buttons === 0) {
+      const manija = estado.seleccion ? visor.manijaEn(x, y) : null;
+      visor.resaltar(manija ? null : visor.controladorEn(x, y), !!manija || undefined);
+    }
+    return;
+  }
   if (arrastre.inversa) {
     // el punto intermedio guarda cuánto se corrió de donde lo pone la curva: sigue a sus dientes
     const golpe = visor.picar(x, y);
@@ -295,8 +333,9 @@ function soltar(ev) {
     return;
   }
   if (!arrastre) return;
-  const movio = arrastre.movio;
+  const { movio, antes } = arrastre;
   arrastre = null;
+  if (movio && antes) recordar(antes);
   if (movio) resolverTodo(); else mostrar();
   pintarPanel();
 }
@@ -304,10 +343,13 @@ visor.lienzo.addEventListener('pointerup', soltar);
 visor.lienzo.addEventListener('pointercancel', soltar);
 visor.lienzo.addEventListener('contextmenu', (ev) => ev.preventDefault());
 
+let antesDeDeslizar = /** @type {string | null} */ (null);
 function deslizar(id, valor, final) {
   const max = actual();
   if (!max) return;
+  antesDeDeslizar ??= foto();
   max[id] = valor;
+  if (final) { recordar(antesDeDeslizar); antesDeDeslizar = null; }
   pintarHud();
   const ahora = performance.now();
   if (final) resolverTodo();
@@ -319,6 +361,7 @@ function restablecerInversa() {
   const max = actual();
   const clave = estado.seleccion?.slice(2);
   if (!max || !clave || !max.inversas?.[clave]) return;
+  recordar();
   const { [clave]: _, ...resto } = max.inversas;
   max.inversas = resto;
   pintarPanel(); resolverTodo();
@@ -328,6 +371,7 @@ function borrarPunto() {
   const max = actual();
   if (!max || !estado.seleccion) return;
   if (esInversa(estado.seleccion)) { restablecerInversa(); return; }
+  recordar();
   const borrar = new Set([...estado.elegidos, estado.seleccion]);
   max.controladores = max.controladores.filter((c) => !borrar.has(c.id));
   // los ajustes de los puntos intermedios de esos dientes ya no tienen a quién seguir
@@ -342,6 +386,7 @@ function restablecerFeston() {
   if (esInversa(estado.seleccion)) { restablecerInversa(); return; }
   const c = actual()?.controladores.find((k) => k.id === estado.seleccion);
   if (!c?.manijas) return;
+  recordar();
   delete c.manijas;
   pintarPanel(); resolverTodo();
 }
@@ -355,12 +400,21 @@ function quitarClave() {
     avisar('Es el único keyframe del punto: para sacarlo, borrá el punto.', true);
     return;
   }
+  recordar();
   delete c.claves[estado.num];
   pintarPanel(); resolverTodo();
 }
 
 window.addEventListener('keydown', (ev) => {
+  const ctrl = ev.ctrlKey || ev.metaKey, tecla = ev.key.toLowerCase();
+  if (ctrl && tecla === 's') { ev.preventDefault(); $('guardar').click(); return; }
   if (/** @type {HTMLElement} */ (ev.target).matches('input, select, textarea')) return;
+  if (ctrl && (tecla === 'z' || tecla === 'y')) {
+    ev.preventDefault();
+    if (tecla === 'y' || ev.shiftKey) rehacer(); else deshacer();
+    return;
+  }
+  if (ctrl) return;
   const nums = estado.maxilar ? movimientos(estado.maxilar).map((m) => m.num) : [];
   const i = nums.indexOf(estado.num ?? '');
   if (ev.key === 'ArrowRight' && i >= 0 && i < nums.length - 1) irA(nums[i + 1]);
@@ -458,6 +512,7 @@ $('restablecer').addEventListener('click', restablecerFeston);
 for (const campo of ['offset', 'festoneado']) {
   $(`usa-${campo}`).addEventListener('change', (ev) => {
     const sigue = /** @type {HTMLInputElement} */ (ev.target).checked;
+    recordar();
     for (const c of actual()?.controladores ?? []) {
       if (!estado.elegidos.has(c.id)) continue;
       if (sigue) delete c[campo]; else c[campo] = false;
@@ -481,64 +536,128 @@ for (const tipo of ['dragleave', 'drop']) document.addEventListener(tipo, (ev) =
 document.addEventListener('drop', (ev) => cargarArchivos(ev.dataTransfer?.files ?? []));
 
 // ---------- exportar, guardar y abrir ----------
-function bajar(nombre, texto, tipo = 'text/plain') {
+/** Descarga común, para los navegadores que no dejan elegir dónde guardar. */
+function bajar(nombre, contenido, tipo = 'text/plain') {
   const a = document.createElement('a');
-  a.href = URL.createObjectURL(new Blob([texto], { type: tipo }));
+  a.href = URL.createObjectURL(contenido instanceof Blob ? contenido : new Blob([contenido], { type: tipo }));
   a.download = nombre;
   a.click();
   setTimeout(() => URL.revokeObjectURL(a.href), 2000);
 }
 const idCaso = () => /** @type {HTMLInputElement} */ ($('caso')).value.trim() || 'caso';
+const elegirDonde = 'showSaveFilePicker' in window;
 
+// Exportar: los .pts para la máquina. Primero se elige la carpeta (el navegador solo deja abrir
+// el selector justo después del clic), después se calculan las curvas.
 $('exportar').addEventListener('click', async () => {
+  let carpeta = null;
+  if ('showDirectoryPicker' in window) {
+    try { carpeta = await /** @type {any} */ (window).showDirectoryPicker({ id: 'exportar', mode: 'readwrite' }); }
+    catch (e) { if (e.name === 'AbortError') return; }
+  }
   try {
+    avisar('Exportando…');
     const maxilares = Object.fromEntries(Object.keys(MAXILARES).filter((m) => movimientos(m).length && estado.maxilares[m].controladores.length).map((m) => [m, paraServidor(m)]));
     const r = await api.exportar({
       id: idCaso(), formato: /** @type {HTMLSelectElement} */ ($('formato')).value,
-      n: Number(/** @type {HTMLInputElement} */ ($('puntos')).value) || 500, maxilares,
+      n: Number(/** @type {HTMLInputElement} */ ($('puntos')).value) || 300, maxilares,
     });
-    if ('showDirectoryPicker' in window) {
-      try {
-        const carpeta = await /** @type {any} */ (window).showDirectoryPicker({ mode: 'readwrite' });
-        for (const f of r.archivos) {
-          const w = await (await carpeta.getFileHandle(f.nombre, { create: true })).createWritable();
-          await w.write(f.texto); await w.close();
-        }
-        avisar(`Exportado: ${r.archivos.map((f) => f.nombre).join(', ')}`);
-        return;
-      } catch (e) { if (e.name === 'AbortError') return; }
+    for (const f of r.archivos) {
+      // los que no son UTF-8 (el .json va en Latin-1) llegan ya en bytes
+      const contenido = f.datos ? new Blob([Uint8Array.from(atob(f.datos), (ch) => ch.charCodeAt(0))]) : f.texto;
+      if (!carpeta) { bajar(f.nombre, contenido); continue; }
+      const w = await (await carpeta.getFileHandle(f.nombre, { create: true })).createWritable();
+      await w.write(contenido); await w.close();
     }
-    for (const f of r.archivos) bajar(f.nombre, f.texto);
     avisar(`Exportado: ${r.archivos.map((f) => f.nombre).join(', ')}`);
   } catch (e) { avisar(e.message, true); }
 });
 
-$('guardar').addEventListener('click', () => {
-  bajar(`${idCaso()}.trimline.json`, JSON.stringify({
-    formato: 'aligner-trimline', version: 1, id: idCaso(),
-    archivos: estado.archivos.map(({ malla, nombre, maxilar, mov, usar }) => ({ malla, nombre, maxilar, mov, usar })),
-    maxilares: estado.maxilares,
-  }, null, 1), 'application/json');
+// Guardar: una foto entera del trabajo, mallas incluidas, en un .trimline
+$('guardar').addEventListener('click', async () => {
+  let destino = null;
+  if (elegirDonde) {
+    try {
+      destino = await /** @type {any} */ (window).showSaveFilePicker({
+        id: 'trabajo', suggestedName: `${idCaso()}.trimline`,
+        types: [{ description: 'Trabajo de línea de recorte', accept: { 'application/zip': ['.trimline'] } }],
+      });
+    } catch (e) { if (e.name === 'AbortError') return; }
+  }
+  try {
+    avisar('Guardando…');
+    const blob = await api.guardarTrabajo({
+      id: idCaso(),
+      archivos: estado.archivos.map(({ malla, nombre, maxilar, mov, usar }) => ({ malla, nombre, maxilar, mov, usar })),
+      maxilares: estado.maxilares,
+      vista: { maxilar: estado.maxilar, num: estado.num, modo: estado.modo },
+      exportar: { formato: /** @type {HTMLSelectElement} */ ($('formato')).value, n: Number(/** @type {HTMLInputElement} */ ($('puntos')).value) || 300 },
+    });
+    if (destino) {
+      const w = await destino.createWritable();
+      await w.write(blob); await w.close();
+    } else bajar(`${idCaso()}.trimline`, blob);
+    avisar(`Guardado: ${destino?.name ?? `${idCaso()}.trimline`}`);
+  } catch (e) { avisar(`No se pudo guardar: ${e.message}`, true); }
 });
+
+/** Un trabajo viejo (.trimline.json): trae los puntos, pero las mallas hay que arrastrarlas. */
+function abrirJson(t) {
+  if (t.formato !== 'aligner-trimline') throw new Error('no es un trabajo de aligner-trimline');
+  estado.maxilares = { sup: { ...nuevoMaxilar(), ...t.maxilares?.sup }, inf: { ...nuevoMaxilar(), ...t.maxilares?.inf } };
+  pendientes = t.archivos ?? [];
+  /** @type {HTMLInputElement} */ ($('caso')).value = t.id ?? '';
+  for (const a of estado.archivos) {
+    const p = pendientes.find((q) => q.nombre === a.nombre);
+    if (p) Object.assign(a, { maxilar: p.maxilar, mov: p.mov, usar: p.usar });
+  }
+  curvas.sup = {}; curvas.inf = {};
+  alCambiarArchivos();
+  const faltan = pendientes.filter((p) => !estado.archivos.some((a) => a.nombre === p.nombre)).length;
+  avisar(faltan ? `Trabajo abierto. Arrastrá sus ${faltan} modelos para verlo.` : 'Trabajo abierto.');
+}
+
+/** Un .trimline: queda todo como estaba al guardarlo. */
+async function abrirTrabajo(archivo) {
+  avisar('Abriendo…');
+  const { trabajo: t, mallas } = await api.abrirTrabajo(archivo);
+  const arriba = Object.fromEntries(mallas.map((m) => [m.id, m.arriba]));
+  let hechas = 0;
+  for (const id of Object.keys(arriba)) {
+    avisar(`Abriendo: malla ${++hechas} de ${mallas.length}`);
+    if (!visor.tiene(id)) visor.registrar(id, await api.bajarMalla(id));
+  }
+  estado.archivos = (t.archivos ?? []).map((a) => ({ ...a, arriba: arriba[a.malla] ?? [0, 0, 1] }));
+  estado.maxilares = { sup: { ...nuevoMaxilar(), ...t.maxilares?.sup }, inf: { ...nuevoMaxilar(), ...t.maxilares?.inf } };
+  pendientes = [];
+  /** @type {HTMLInputElement} */ ($('caso')).value = t.id ?? '';
+  if (t.exportar?.n) /** @type {HTMLInputElement} */ ($('puntos')).value = String(t.exportar.n);
+  if (t.exportar?.formato && [...$('formato').querySelectorAll('option')].some((o) => o.value === t.exportar.formato)) {
+    /** @type {HTMLSelectElement} */ ($('formato')).value = t.exportar.formato;
+  }
+  if (t.vista && 'modo' in t.vista) estado.modo = t.vista.modo;
+  curvas.sup = {}; curvas.inf = {};
+  estado.maxilar = null;
+  alCambiarArchivos();
+  if (t.vista?.maxilar && movimientos(t.vista.maxilar).length) {
+    if (t.vista.maxilar !== estado.maxilar) elegirMaxilar(t.vista.maxilar, true);
+    irA(movimientos(t.vista.maxilar).some((m) => m.num === t.vista.num) ? t.vista.num : base(t.vista.maxilar));
+  }
+  avisar(`Trabajo abierto: ${archivo.name}`);
+}
+
 $('abrir').addEventListener('click', () => $('trabajo').click());
 $('trabajo').addEventListener('change', async (ev) => {
   const el = /** @type {HTMLInputElement} */ (ev.target);
-  try {
-    const t = JSON.parse(await /** @type {File} */ (el.files?.[0]).text());
-    if (t.formato !== 'aligner-trimline') throw new Error('no es un trabajo de aligner-trimline');
-    estado.maxilares = { sup: { ...nuevoMaxilar(), ...t.maxilares?.sup }, inf: { ...nuevoMaxilar(), ...t.maxilares?.inf } };
-    pendientes = t.archivos ?? [];
-    /** @type {HTMLInputElement} */ ($('caso')).value = t.id ?? '';
-    for (const a of estado.archivos) {
-      const p = pendientes.find((q) => q.nombre === a.nombre);
-      if (p) Object.assign(a, { maxilar: p.maxilar, mov: p.mov, usar: p.usar });
-    }
-    curvas.sup = {}; curvas.inf = {};
-    alCambiarArchivos();
-    const faltan = pendientes.filter((p) => !estado.archivos.some((a) => a.nombre === p.nombre)).length;
-    avisar(faltan ? `Trabajo abierto. Arrastrá sus ${faltan} modelos para verlo.` : 'Trabajo abierto.');
-  } catch (e) { avisar(`No se pudo abrir: ${e.message}`, true); }
+  const archivo = el.files?.[0];
   el.value = '';
+  if (!archivo) return;
+  try {
+    if (/\.curva$/i.test(archivo.name)) throw new Error('ese .curva son los datos del caso que salen al exportar; el trabajo se guarda en un .trimline');
+    if (/\.json$/i.test(archivo.name)) abrirJson(JSON.parse(await archivo.text()));
+    else await abrirTrabajo(archivo);
+    olvidarHistorial();
+  } catch (e) { avisar(`No se pudo abrir: ${e.message}`, true); }
 });
 
 $('salir').addEventListener('click', async () => {

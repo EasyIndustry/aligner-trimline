@@ -21,6 +21,9 @@ def test_nombres():
     assert (a["id"], a["etapa"], a["maxilar"], a["movimiento"]) == ("0044", "1.0", "sup", "01")
     b = nombres.interpretar("00009 Caso Prueba 2.1 Inf 3 CNC2.stl")
     assert (b["maxilar"], b["movimiento"], b["sufijo"]) == ("inf", "03", "CNC2")
+    d = nombres.interpretar("BN595 Apellido Nombre 2.0 BIS Sup 00 CNC3.stl")
+    assert (d["id"], d["paciente"], d["etapa"], d["fase"], d["maxilar"], d["movimiento"], d["sufijo"]) == \
+        ("BN595", "Apellido Nombre", "2.0", "BIS", "sup", "00", "CNC3")
     c = nombres.interpretar("28-07-2022_16-29-03_Subsetup10_Mandibular.stl")
     assert (c["maxilar"], c["movimiento"]) == ("inf", "10")
     assert nombres.interpretar("cualquiera.stl")["maxilar"] is None
@@ -105,25 +108,51 @@ def test_keyframes_absolutos_e_interpolados(malla):
 def test_exportar_pts(malla):
     assert {"pts", "pts-por-curva"} <= set(EXPORTADORES)
     m = maxilar(malla)
-    m["controladores"][0]["claves"]["03"] = m["controladores"][0]["claves"]["00"]
+    m["controladores"][0]["claves"]["02"] = m["controladores"][0]["claves"]["00"]
     movs = []
     for mov in m["movimientos"]:
         r = proyecto.resolver(m, mov["num"], n=50)
         movs.append({"num": mov["num"], "cerrada": True, "curva": r["tramos"][0]["puntos"],
                      "controladores": r["controladores"], "tiene_clave": mov["num"] in proyecto.con_keyframe(m)})
-    trabajo = {"id": "0044", "maxilares": {"sup": movs, "inf": movs[:2]}}
-    curvas, control = exportar("pts", trabajo)
-    assert (curvas["nombre"], control["nombre"]) == ("0044.pts", "0044_PC.pts")
+    datos = nombres.interpretar("BN595 Caso Prueba 2.0 BIS Sup 00 CNC3.stl")
+    trabajo = {"id": "BN595", "datos": datos, "maxilares": {"sup": movs, "inf": movs[:2]}}
+    curvas, control, caso = exportar("pts", trabajo)
+    assert (curvas["nombre"], control["nombre"], caso["nombre"]) == ("BN595.pts", "BN595 PC.pts", "BN595.curva")
     lineas = curvas["texto"].split("\r\n")
     assert lineas[-1] == "" and lineas[0] == "inf 00" and lineas[51] == "inf 01"   # inferior primero, 50 puntos
     assert [x for x in lineas if x[:3] in ("inf", "sup")] == ["inf 00", "inf 01", "sup 00", "sup 01", "sup 02", "sup 03", "sup 04"]
-    assert all(len(x.split()) == 3 and all(len(n.split(".")[1]) == 4 for n in x.split()) for x in lineas[1:51])
-    assert "-0.0000" not in curvas["texto"]
-    assert [x for x in control["texto"].split("\r\n") if x[:3] in ("inf", "sup")] == ["inf 00", "sup 00", "sup 03"]
+    numeros = [n for x in lineas[1:51] for n in x.split()]
+    assert all(len(x.split()) == 3 for x in lineas[1:51])
+    assert all(len(n.split(".")[1]) <= 6 and not n.endswith("0") for n in numeros if "." in n)
+    assert "-0 " not in curvas["texto"] and not any(n == "-0" for n in numeros)
+    # puntos de control: primero, último y con keyframe
+    assert [x for x in control["texto"].split("\r\n") if x[:3] in ("inf", "sup")] == ["inf 00", "inf 01", "sup 00", "sup 02", "sup 04"]
+    assert caso["texto"] == '{"referencia": "CNC3", "id": "BN595", "nombre": "Caso Prueba 2.0", "etapa": "BIS"}'
+    assert caso["codificacion"] == "latin-1"
     sueltos = exportar("pts-por-curva", trabajo)
-    assert [f["nombre"] for f in sueltos][:3] == ["0044_inf_00.pts", "0044_inf_01.pts", "0044_sup_00.pts"]
+    assert [f["nombre"] for f in sueltos][:3] == ["BN595_inf_00.pts", "BN595_inf_01.pts", "BN595_sup_00.pts"]
     assert len(sueltos[0]["texto"].strip().split("\r\n")) == 50
-    assert len(exportar("pts", trabajo, {"decimales": 3})[0]["texto"].split("\r\n")[1].split()[0].split(".")[1]) == 3
+
+
+def test_numeros_como_los_del_kuka():
+    from trimline.exportar.pts import _num
+    assert [_num(x, 6) for x in (12.74834, -25.4985574, -1.0, -0.0000001, 0.000743)] == ["12.74834", "-25.498557", "-1", "0", "0.000743"]
+
+
+def test_orden_de_los_puntos_de_control():
+    from trimline.exportar.pts import _orden_maquina
+    c = lambda i, t, x: {"id": i, "tipo": t, "pos": [x, 0, 0]}
+    arcada = [c("e1", "e", 20), c("v1", "v", 15), c("v2", "v", -15), c("e2", "e", -20), c("l1", "l", -10), c("l2", "l", 10)]
+    assert [k["id"] for k in _orden_maquina(arcada)] == ["e2", "v2", "v1", "e1", "l1", "l2"]
+
+
+def test_curva_arranca_adelante_hacia_mas_x(malla):
+    t = proyecto.resolver(maxilar(malla), "00", n=200)["tramos"][0]
+    p = curva.desde_el_frente(t["puntos"], t["claves"], t["info"])
+    assert len(p) == 200
+    assert abs(p[0, 0]) < 1e-6 and p[1, 0] > p[0, 0]
+    # adelante es del lado vestibular: más lejos del centro que los linguales
+    assert np.hypot(p[0, 0], p[0, 1]) > 13
 
 
 def test_bezier_tangentes_planas_y_ancho(malla):

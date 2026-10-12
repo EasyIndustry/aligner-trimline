@@ -37,3 +37,17 @@ export const actualizacion = (buscar = false) => fetch(`/api/actualizacion?busca
 export const instalarVersion = (tag) => enviar('/api/actualizacion/instalar', { tag });
 export const revertirVersion = () => enviar('/api/actualizacion/revertir');
 export const version = () => fetch('/api/version').then(json);
+
+/** El trabajo entero con sus mallas, como el contenido de un archivo .trimline (Blob). */
+export async function guardarTrabajo(trabajo) {
+  const r = await fetch('/api/trabajo/guardar', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(trabajo),
+  });
+  if (!r.ok) await json(r);
+  return r.blob();
+}
+
+/** Abre un .trimline: el servidor carga sus mallas. Devuelve { trabajo, mallas: [resumen] }. */
+export const abrirTrabajo = (archivo) => fetch('/api/trabajo/abrir', {
+  method: 'POST', headers: { 'Content-Type': 'application/octet-stream' }, body: archivo,
+}).then(json);

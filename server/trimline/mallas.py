@@ -155,6 +155,18 @@ def cargar(datos: bytes, nombre: str) -> Malla:
     return malla
 
 
+def desde_binario(ident: str, nombre: str, datos: bytes, arriba, base: float) -> Malla:
+    """Vuelve a cargar una malla guardada con `binario()`, con su id y su base de antes."""
+    if ident in _MALLAS:
+        return _MALLAS[ident]
+    nv, nf = np.frombuffer(datos[:8], dtype="<u4")
+    v = np.frombuffer(datos, dtype="<f4", count=int(nv) * 3, offset=8).reshape(-1, 3).copy()
+    f = np.frombuffer(datos, dtype="<u4", count=int(nf) * 3, offset=8 + int(nv) * 12).reshape(-1, 3).copy()
+    malla = Malla(id=ident, nombre=nombre, v=v, f=f, arriba=np.asarray(arriba, dtype=np.float64), base=float(base))
+    _MALLAS[ident] = malla
+    return malla
+
+
 def obtener(ident: str) -> Malla:
     try:
         return _MALLAS[ident]

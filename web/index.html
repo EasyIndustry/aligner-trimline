@@ -65,18 +65,18 @@
     <details data-seccion="4. Exportar" open>
       <summary>4. Exportar</summary>
       <label class="fila">Formato <select id="formato"></select></label>
-      <label class="fila">Puntos por curva <input id="puntos" type="number" min="10" max="5000" step="10" value="500" /></label>
-      <div class="botones"><button id="exportar" type="button">Exportar</button></div>
+      <label class="fila">Puntos por curva <input id="puntos" type="number" min="10" max="5000" step="10" value="300" /></label>
+      <div class="botones"><button id="exportar" type="button" title="Los .pts para la máquina">Exportar</button></div>
     </details>
 
     <details data-seccion="Trabajo" open>
       <summary>Trabajo</summary>
       <div class="botones">
-        <button id="guardar" type="button">Guardar</button>
+        <button id="guardar" type="button" title="Ctrl+S. Todo el trabajo, con las mallas, en un archivo .trimline">Guardar</button>
         <button id="abrir" type="button">Abrir</button>
         <button id="salir" type="button" title="Apaga el servidor local">Salir</button>
       </div>
-      <input id="trabajo" type="file" accept=".json" hidden />
+      <input id="trabajo" type="file" accept=".trimline,.json" hidden />
     </details>
 
     <details data-seccion="Actualizaciones" open>

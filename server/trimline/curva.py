@@ -191,3 +191,31 @@ def generar(malla: Malla, controladores: list[dict], offset: float = 0.0, amplit
         total += largo_de(puntos, orden["cerrada"])
         tramos.append({"puntos": puntos, "claves": claves, "info": info, "manijas": manijas})
     return {"cerrada": orden["cerrada"], "tramos": tramos, "largo": total}
+
+
+def desde_el_frente(puntos: np.ndarray, claves: np.ndarray, info: list[dict]) -> np.ndarray:
+    """La curva cerrada vuelta a recorrer como la espera la máquina: arranca adelante, donde el
+    lado vestibular cruza x = 0, y sigue hacia +x. Mantiene la cantidad de puntos.
+
+    La curva generada arranca en un extremo y va por los vestibulares hasta el otro; ese tramo es
+    el que se mira. Si no cruza x = 0 (un modelo en otras coordenadas), arranca a mitad del tramo.
+    """
+    n = len(puntos)
+    extremos = [k for k, i in enumerate(info) if i["clase"] == "cresta" and i["tipo"] == "e"]
+    if len(extremos) < 2:
+        return puntos
+    fin = int(np.linalg.norm(puntos - claves[extremos[1]], axis=1).argmin())
+    x = puntos[: fin + 1, 0]
+    cruces = np.nonzero(np.sign(x[:-1]) * np.sign(x[1:]) <= 0)[0]
+    if len(cruces):
+        i = int(cruces[len(cruces) // 2])
+        t = x[i] / (x[i] - x[i + 1]) if x[i] != x[i + 1] else 0.0
+    else:
+        largo = np.concatenate([[0.0], np.cumsum(np.linalg.norm(np.diff(puntos[: fin + 1], axis=0), axis=1))])
+        i = min(int(np.searchsorted(largo, largo[-1] / 2)), max(fin - 1, 0))
+        t = 0.0
+    inicio = puntos[i] + (puntos[i + 1] - puntos[i]) * t
+    adelante = np.vstack([puntos[i + 1:], puntos[: i + 1]])
+    if adelante[0, 0] < inicio[0]:                          # que siga hacia +x
+        adelante = adelante[::-1]
+    return remuestrear(np.vstack([inicio, adelante]), True, n=n)

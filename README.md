@@ -28,7 +28,14 @@ instala con `AlignerTrimlineSetup-<versión>.exe`, que sale de cada release.
 5. **Movimientos.** Arrastrá el cursor de la línea de tiempo. Si en un movimiento la curva
    quedó corrida, mové el punto: queda un keyframe ahí y la curva avanza de a poco entre
    keyframes.
-6. **Exportar.** `<ID>.pts` con todas las curvas y `<ID>_PC.pts` con los puntos de control.
+6. **Exportar.** `<ID>.pts` con todas las curvas, `<ID> PC.pts` con los puntos de control y
+   `<ID>.curva` con los datos del caso (un JSON), igual que los que ya consume el generador del KUKA.
+   El navegador pregunta en qué carpeta dejarlos.
+7. **Guardar.** `<ID>.trimline` es una foto entera del trabajo: puntos, keyframes, ajustes, la
+   vista y las mallas ya procesadas. Abrirlo deja todo como estaba, sin volver a arrastrar
+   los STL. Los `.trimline.json` de antes también se abren (las mallas sí hay que arrastrarlas).
+
+Ctrl+Z deshace y Ctrl+Y (o Ctrl+Shift+Z) rehace; Ctrl+S guarda.
 
 Mouse: clic izquierdo marca y mueve; clic derecho orbita; shift + clic derecho desplaza; la
 rueda hace zoom.

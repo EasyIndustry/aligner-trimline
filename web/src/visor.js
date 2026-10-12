@@ -6,7 +6,6 @@ import { Line2 } from 'three/addons/lines/Line2.js';
 import { LineGeometry } from 'three/addons/lines/LineGeometry.js';
 import { LineMaterial } from 'three/addons/lines/LineMaterial.js';
 import { createEngine } from '../vendor/threejs-render-engine/src/index.js';
-import { createMaterialEngine } from '../vendor/threejs-material-engine/adapters/three/engine.js';
 
 THREE.BufferGeometry.prototype.computeBoundsTree = computeBoundsTree;
 THREE.BufferGeometry.prototype.disposeBoundsTree = disposeBoundsTree;
@@ -15,10 +14,27 @@ THREE.Mesh.prototype.raycast = acceleratedRaycast;
 export const COLORES = { v: 0x1f6fd0, l: 0xd9741a, e: 0x1e9a4a, inversa: 0x666666, seleccion: 0xffd400, curva: 0xff3b4e, manija: 0x7df9ff };
 const RADIO_PX = 6;
 
+/** El matcap del modelo: un yeso gris claro, con el brillo arriba a la izquierda y bordes más oscuros. */
+function matcapYeso() {
+  const c = document.createElement('canvas');
+  c.width = c.height = 256;
+  const g = /** @type {CanvasRenderingContext2D} */ (c.getContext('2d'));
+  const r = g.createRadialGradient(104, 92, 4, 128, 128, 168);
+  r.addColorStop(0, '#cdc9c3'); r.addColorStop(0.35, '#a29d96'); r.addColorStop(0.7, '#625e58'); r.addColorStop(1, '#2c2a27');
+  g.fillStyle = r; g.fillRect(0, 0, 256, 256);
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace;
+  return t;
+}
+/** A cuánto (mm) del mouse un punto ya se agranda y se deja agarrar. */
+const CERCA_MM = 0.5;
+
 export async function crearVisor(contenedor) {
   const motor = createEngine(contenedor, { preset: 'studio', area: 90, quality: 'media' });
   motor.show({ grid: false, floor: false, shadows: false, fog: false });
-  motor.tweak({ background: '#3b3b3b' });      // fondo gris oscuro: el yeso claro resalta
+  // fondo gris oscuro: el yeso, gris claro, resalta sin quemarse; y la cámara sin inercia: se
+  // queda quieta apenas se suelta el mouse
+  motor.tweak({ background: '#3b3b3b', camera: { damping: 0 } });
   // clic derecho orbita, shift + clic derecho desplaza, la rueda hace zoom; el izquierdo queda
   // libre para marcar y mover puntos (shift + derecho va primero: gana la primera regla)
   motor.view.input({
@@ -32,13 +48,14 @@ export async function crearVisor(contenedor) {
 
   // todo lo del modelo cuelga de acá, en las coordenadas del archivo; el grupo lo para con la
   // base hacia abajo (el motor tiene +Y arriba)
+  const lienzo = motor.renderer.domElement;
   const raiz = new THREE.Group();
   motor.content.add(raiz);
 
-  let material = /** @type {THREE.Material} */ (new THREE.MeshStandardMaterial({ color: 0xe6dfd2, roughness: 0.65 }));
-  try {
-    material = await createMaterialEngine(motor.renderer).material({ name: 'Yeso', channels: { baseColor: '#e6dfd2', roughness: 0.65 } });
-  } catch (e) { console.warn('motor de materiales:', e); }
+  // MATCAP: la luz va pegada a la cámara (una textura que dice qué tono tiene cada dirección de
+  // la normal), sin sol ni sombras. Se ve parejo desde cualquier lado y el yeso no se quema. El
+  // modo 'matcap' del motor no sirve acá: pisa el material de todas las mallas, puntos incluidos.
+  const material = new THREE.MeshMatcapMaterial({ matcap: matcapYeso() });
   // la malla un pelo hacia atrás en profundidad, para que la curva apoyada encima se vea entera
   material.polygonOffset = true; material.polygonOffsetFactor = 1; material.polygonOffsetUnits = 2;
 
@@ -162,14 +179,21 @@ export async function crearVisor(contenedor) {
     porId.get(id)?.position.set(pos[0], pos[1], pos[2]);
   }
 
-  // los puntos miden lo mismo en pantalla a cualquier distancia
+  // los puntos miden lo mismo en pantalla a cualquier distancia; el que está bajo el mouse, algo más
   const mundo = new THREE.Vector3();
+  let resaltado = /** @type {string | null} */ (null);
   motor.onFrame(() => {
     for (const m of puntos.children) {
       m.getWorldPosition(mundo);
-      m.scale.setScalar(motor.view.worldPerPixel([mundo.x, mundo.y, mundo.z]) * m.userData.radio);
+      const grande = m.userData.id && m.userData.id === resaltado ? 1.45 : 1;
+      m.scale.setScalar(motor.view.worldPerPixel([mundo.x, mundo.y, mundo.z]) * m.userData.radio * grande);
     }
   });
+  /** Agranda el punto `id` (o ninguno) y cambia el cursor si hay algo para agarrar. */
+  function resaltar(id, agarrable = !!id) {
+    resaltado = id;
+    lienzo.style.cursor = agarrable ? 'pointer' : '';
+  }
 
   // ---------- el rayo del mouse ----------
   const rayo = new THREE.Raycaster();
@@ -186,21 +210,27 @@ export async function crearVisor(contenedor) {
   }
 
   /** Dónde se ve un punto dibujado: [x, y] en píxeles, o null si queda detrás de la cámara o tapado. */
-  function enPantalla(m) {
+  function enPantalla(m, x = null, y = null, tol = Infinity) {
     m.getWorldPosition(mundo);
     const [px, py, prof] = motor.view.project([mundo.x, mundo.y, mundo.z]);
     if (prof < 0 || prof > 1) return null;
+    if (x !== null && Math.hypot(px - x, py - (y ?? 0)) >= tol) return null;     // lejos: ni se mira si está tapado
     // un punto tapado por el modelo no se agarra: el rayo tiene que llegar hasta él
     const golpe = picar(px, py);
     if (golpe && m.position.distanceTo(new THREE.Vector3(...golpe.pos)) > 1.5) return null;
     return [px, py];
   }
 
-  /** El controlador que está bajo el mouse (a menos de `tol` píxeles), o null. */
+  /**
+   * El punto que está bajo el mouse, o null: a menos de `tol` píxeles o de CERCA_MM milímetros
+   * (lo que dé más), así de cerca o de lejos siempre hay un margen para agarrarlo.
+   */
   function controladorEn(x, y, tol = 11) {
-    let mejor = null, dist = tol;
+    let mejor = null, dist = Infinity;
     for (const [id, m] of porId) {
-      const p = enPantalla(m);
+      m.getWorldPosition(mundo);
+      const margen = Math.max(tol, CERCA_MM / motor.view.worldPerPixel([mundo.x, mundo.y, mundo.z]));
+      const p = enPantalla(m, x, y, margen);
       const d = p ? Math.hypot(p[0] - x, p[1] - y) : Infinity;
       if (d < dist) { dist = d; mejor = id; }
     }
@@ -250,5 +280,5 @@ export async function crearVisor(contenedor) {
     return motor.view.project([p.x, p.y, p.z]);
   }
 
-  return { aPantalla, posicion, controladoresEn, manijaEn, enPlano, moverManija, motor, lienzo: motor.renderer.domElement, registrar, tiene: (id) => geometrias.has(id), orientar, mostrar, encuadrar, dibujar, moverPunto, picar, controladorEn };
+  return { aPantalla, resaltar, posicion, controladoresEn, manijaEn, enPlano, moverManija, motor, lienzo, registrar, tiene: (id) => geometrias.has(id), orientar, mostrar, encuadrar, dibujar, moverPunto, picar, controladorEn };
 }
