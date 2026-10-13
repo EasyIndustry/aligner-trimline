@@ -27,7 +27,7 @@
 
     <details data-seccion="1. Modelos" open>
       <summary>1. Modelos</summary>
-      <div id="soltar">Arrastrá los STL acá o <button id="elegir" type="button">elegí archivos</button></div>
+      <div id="soltar">Arrastrá los STL acá, <button id="elegir" type="button">elegí archivos</button> o <button id="elegir-modelos" type="button" title="Cargados desde su carpeta, el .trimline anota dónde están y al abrirlo se leen solos">elegí carpeta</button></div>
       <input id="archivos" type="file" accept=".stl,.ply,.obj" multiple hidden />
       <label class="fila">ID del caso <input id="caso" type="text" placeholder="0044" /></label>
       <table id="tabla">
@@ -77,7 +77,7 @@
     <details data-seccion="Trabajo" open>
       <summary>Trabajo</summary>
       <div class="botones">
-        <button id="guardar" type="button" title="Ctrl+S. Todo el trabajo, con las mallas, en un archivo .trimline">Guardar</button>
+        <button id="guardar" type="button" title="Ctrl+S. El trabajo en un archivo .trimline (los modelos no van adentro: solo dónde están)">Guardar</button>
         <button id="abrir" type="button">Abrir</button>
         <button id="salir" type="button" title="Apaga el servidor local">Salir</button>
       </div>

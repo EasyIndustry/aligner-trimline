@@ -69,21 +69,46 @@ async function cargarArchivos(lista) {
   let hechos = 0;
   for (const archivo of archivos) {
     avisar(`Cargando ${++hechos} de ${archivos.length}: ${archivo.name}`);
-    try {
-      const r = await api.subirMalla(archivo);
-      if (!visor.tiene(r.id)) visor.registrar(r.id, await api.bajarMalla(r.id));
-      if (estado.archivos.some((a) => a.malla === r.id && a.nombre === r.nombre)) continue;
-      const previo = pendientes.find((p) => p.malla === r.id && p.nombre === r.nombre) ?? pendientes.find((p) => p.nombre === r.nombre);
-      estado.archivos.push({
-        malla: r.id, nombre: r.nombre, arriba: r.arriba,
-        maxilar: previo?.maxilar ?? r.archivo.maxilar, mov: previo?.mov ?? r.archivo.movimiento ?? '', usar: previo?.usar ?? true,
-      });
-      const caso = /** @type {HTMLInputElement} */ ($('caso'));
-      if (!caso.value && r.archivo.id) caso.value = r.archivo.id;
-    } catch (e) { avisar(String(e.message ?? e), true); }
+    try { await agregarMalla(await api.subirMalla(archivo)); } catch (e) { avisar(String(e.message ?? e), true); }
   }
+  finCarga();
+}
+
+/** Carga los modelos de una carpeta: el servidor los lee del disco y sabe dónde están (va al .trimline). */
+async function cargarCarpeta() {
+  const inicial = estado.archivos.find((a) => a.ruta)?.ruta?.replace(/[\\/][^\\/]*$/, '') || campoCarpeta.value.trim() || null;
+  try {
+    const { carpeta } = await api.elegirCarpeta(inicial, 'Carpeta con los modelos');
+    if (!carpeta) return;
+    avisar('Cargando modelos…');
+    const r = await api.mallasDeCarpeta(carpeta);
+    if (!r.mallas.length) { avisar(`No hay modelos (.stl, .ply, .obj) en ${carpeta}`, true); return; }
+    let hechos = 0;
+    for (const m of r.mallas) {
+      avisar(`Cargando ${++hechos} de ${r.mallas.length}: ${m.nombre}`);
+      await agregarMalla(m);
+    }
+    finCarga();
+    if (r.errores.length) avisar(`No se pudieron leer: ${r.errores.join('; ')}`, true);
+  } catch (e) { avisar(e.message, true); }
+}
+
+async function agregarMalla(r) {
+  if (!visor.tiene(r.id)) visor.registrar(r.id, await api.bajarMalla(r.id));
+  if (estado.archivos.some((a) => a.malla === r.id && a.nombre === r.nombre)) return;
+  const previo = pendientes.find((p) => p.malla === r.id && p.nombre === r.nombre) ?? pendientes.find((p) => p.nombre === r.nombre);
+  if (previo) pendientes = pendientes.filter((p) => p !== previo);
+  estado.archivos.push({
+    malla: r.id, nombre: r.nombre, arriba: r.arriba, ruta: r.ruta ?? previo?.ruta,
+    maxilar: previo?.maxilar ?? r.archivo.maxilar, mov: previo?.mov ?? r.archivo.movimiento ?? '', usar: previo?.usar ?? true,
+  });
+  const caso = /** @type {HTMLInputElement} */ ($('caso'));
+  if (!caso.value && r.archivo.id) caso.value = r.archivo.id;
+}
+
+function finCarga() {
   estado.archivos.sort((a, b) => (a.maxilar ?? 'z').localeCompare(b.maxilar ?? 'z') || a.mov.localeCompare(b.mov, undefined, { numeric: true }));
-  avisar(`${estado.archivos.length} modelos cargados`);
+  avisar(pendientes.length ? `${estado.archivos.length} modelos cargados; faltan ${pendientes.length}` : `${estado.archivos.length} modelos cargados`);
   alCambiarArchivos();
 }
 
@@ -530,6 +555,7 @@ for (const d of /** @type {NodeListOf<HTMLDetailsElement>} */ (document.querySel
 
 const soltarEn = $('soltar');
 $('elegir').addEventListener('click', () => $('archivos').click());
+$('elegir-modelos').addEventListener('click', cargarCarpeta);
 $('archivos').addEventListener('change', (ev) => { const el = /** @type {HTMLInputElement} */ (ev.target); cargarArchivos(el.files ?? []); el.value = ''; });
 for (const tipo of ['dragenter', 'dragover']) document.addEventListener(tipo, (ev) => { ev.preventDefault(); soltarEn.classList.add('encima'); });
 for (const tipo of ['dragleave', 'drop']) document.addEventListener(tipo, (ev) => { ev.preventDefault(); soltarEn.classList.remove('encima'); });
@@ -590,22 +616,23 @@ $('exportar').addEventListener('click', async () => {
   } catch (e) { avisar(e.message, true); }
 });
 
-// Guardar: una foto entera del trabajo, mallas incluidas, en un .trimline
+// Guardar: una foto del trabajo en un .trimline. Las mallas no van: solo dónde está cada STL
 $('guardar').addEventListener('click', async () => {
   let destino = null;
   if (elegirDonde) {
     try {
       destino = await /** @type {any} */ (window).showSaveFilePicker({
         id: 'trabajo', suggestedName: `${idCaso()}.trimline`,
-        types: [{ description: 'Trabajo de línea de recorte', accept: { 'application/zip': ['.trimline'] } }],
+        types: [{ description: 'Trabajo de línea de recorte', accept: { 'application/json': ['.trimline'] } }],
       });
     } catch (e) { if (e.name === 'AbortError') return; }
   }
   try {
     avisar('Guardando…');
-    const blob = await api.guardarTrabajo({
+    const { blob, sinRuta } = await api.guardarTrabajo({
       id: idCaso(),
-      archivos: estado.archivos.map(({ malla, nombre, maxilar, mov, usar }) => ({ malla, nombre, maxilar, mov, usar })),
+      // los que no se encontraron al abrir también: así no se pierde dónde estaban
+      archivos: [...estado.archivos, ...pendientes].map(({ malla, nombre, maxilar, mov, usar, ruta }) => ({ malla, nombre, maxilar, mov, usar, ruta })),
       maxilares: estado.maxilares,
       vista: { maxilar: estado.maxilar, num: estado.num, modo: estado.modo },
       exportar: { formato: /** @type {HTMLSelectElement} */ ($('formato')).value, n: Number(/** @type {HTMLInputElement} */ ($('puntos')).value) || 300, carpeta: campoCarpeta.value.trim() },
@@ -614,7 +641,10 @@ $('guardar').addEventListener('click', async () => {
       const w = await destino.createWritable();
       await w.write(blob); await w.close();
     } else bajar(`${idCaso()}.trimline`, blob);
-    avisar(`Guardado: ${destino?.name ?? `${idCaso()}.trimline`}`);
+    const nombre = destino?.name ?? `${idCaso()}.trimline`;
+    avisar(sinRuta
+      ? `Guardado: ${nombre}. De ${sinRuta} modelos no se sabe la carpeta (se arrastraron): al abrirlo habrá que cargarlos de nuevo. Con «elegí carpeta» queda anotada.`
+      : `Guardado: ${nombre}`);
   } catch (e) { avisar(`No se pudo guardar: ${e.message}`, true); }
 });
 
@@ -634,19 +664,20 @@ function abrirJson(t) {
   avisar(faltan ? `Trabajo abierto. Arrastrá sus ${faltan} modelos para verlo.` : 'Trabajo abierto.');
 }
 
-/** Un .trimline: queda todo como estaba al guardarlo. */
+/** Un .trimline: queda todo como estaba al guardarlo. Los modelos se leen de donde estaban. */
 async function abrirTrabajo(archivo) {
   avisar('Abriendo…');
-  const { trabajo: t, mallas } = await api.abrirTrabajo(archivo);
+  const { trabajo: t, mallas, faltan } = await api.abrirTrabajo(archivo);
   const arriba = Object.fromEntries(mallas.map((m) => [m.id, m.arriba]));
   let hechas = 0;
   for (const id of Object.keys(arriba)) {
     avisar(`Abriendo: malla ${++hechas} de ${mallas.length}`);
     if (!visor.tiene(id)) visor.registrar(id, await api.bajarMalla(id));
   }
-  estado.archivos = (t.archivos ?? []).map((a) => ({ ...a, arriba: arriba[a.malla] ?? [0, 0, 1] }));
+  const rutas = Object.fromEntries(mallas.map((m) => [m.id, m.ruta]));
+  estado.archivos = (t.archivos ?? []).map((a) => ({ ...a, arriba: arriba[a.malla] ?? [0, 0, 1], ruta: rutas[a.malla] ?? a.ruta }));
   estado.maxilares = { sup: { ...nuevoMaxilar(), ...t.maxilares?.sup }, inf: { ...nuevoMaxilar(), ...t.maxilares?.inf } };
-  pendientes = [];
+  pendientes = faltan ?? [];
   /** @type {HTMLInputElement} */ ($('caso')).value = t.id ?? '';
   if (t.exportar?.n) /** @type {HTMLInputElement} */ ($('puntos')).value = String(t.exportar.n);
   if (t.exportar?.carpeta) ponerCarpeta(t.exportar.carpeta);
@@ -661,7 +692,10 @@ async function abrirTrabajo(archivo) {
     if (t.vista.maxilar !== estado.maxilar) elegirMaxilar(t.vista.maxilar, true);
     irA(movimientos(t.vista.maxilar).some((m) => m.num === t.vista.num) ? t.vista.num : base(t.vista.maxilar));
   }
-  avisar(`Trabajo abierto: ${archivo.name}`);
+  if (pendientes.length) {
+    const donde = [...new Set(pendientes.map((p) => p.ruta?.replace(/[\\/][^\\/]*$/, '')).filter(Boolean))];
+    avisar(`Trabajo abierto, pero faltan ${pendientes.length} modelos${donde.length ? ` (no están en ${donde.join(', ')})` : ''}: arrastralos o usá «elegí carpeta».`, true);
+  } else avisar(`Trabajo abierto: ${archivo.name}`);
 }
 
 $('abrir').addEventListener('click', () => $('trabajo').click());

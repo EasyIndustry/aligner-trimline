@@ -93,23 +93,42 @@ def resolver(cuerpo: dict) -> dict:
         raise _error(e) from None
 
 
+@app.post("/api/mallas/carpeta")
+def mallas_de_carpeta(cuerpo: dict) -> dict:
+    """Carga los modelos de una carpeta (todos, o los de `nombres`). Así se sabe dónde están."""
+    carpeta = Path(str(cuerpo.get("carpeta") or "")).expanduser()
+    if not carpeta.is_dir():
+        raise HTTPException(status_code=422, detail=f"no existe la carpeta {carpeta}")
+    nombres_ = set(cuerpo.get("nombres") or [])
+    cargadas, errores = [], []
+    for ruta in sorted(carpeta.iterdir()):
+        if ruta.suffix.lower() not in mallas.EXTENSIONES or (nombres_ and ruta.name not in nombres_):
+            continue
+        try:
+            m = mallas.desde_archivo(ruta)
+        except Exception as e:  # noqa: BLE001  (un archivo roto no frena a los demás)
+            errores.append(f"{ruta.name}: {e}")
+            continue
+        cargadas.append({**m.resumen(), "nombre": ruta.name, "archivo": nombres.interpretar(ruta.name)})
+    return {"carpeta": str(carpeta), "mallas": cargadas, "errores": errores}
+
+
 @app.post("/api/trabajo/guardar")
 def guardar_trabajo(cuerpo: dict) -> Response:
-    """El trabajo entero, con sus mallas, como un archivo .trimline."""
-    try:
-        return Response(snapshot.guardar(cuerpo), media_type="application/zip")
-    except KeyError as e:
-        raise _error(e) from None
+    """El trabajo como un archivo .trimline: sin las mallas, con la ruta de cada modelo."""
+    datos, sin_ruta = snapshot.guardar(cuerpo)
+    return Response(datos, media_type="application/json", headers={"X-Sin-Ruta": str(len(sin_ruta))})
 
 
 @app.post("/api/trabajo/abrir")
 async def abrir_trabajo(request: Request) -> dict:
-    """Recibe un .trimline (cuerpo crudo), deja sus mallas cargadas y devuelve el trabajo."""
+    """Recibe un .trimline (cuerpo crudo), carga los modelos que encuentra y devuelve el trabajo."""
     try:
-        trabajo = snapshot.abrir(await request.body())
+        trabajo, faltan = snapshot.abrir(await request.body())
     except (KeyError, ValueError) as e:
         raise HTTPException(status_code=422, detail=f"no se pudo abrir: {str(e).strip(chr(39))}") from None
-    return {"trabajo": trabajo, "mallas": [mallas.obtener(a["malla"]).resumen() for a in trabajo.get("archivos", [])]}
+    return {"trabajo": trabajo, "faltan": faltan,
+            "mallas": [mallas.obtener(a["malla"]).resumen() for a in trabajo.get("archivos", [])]}
 
 
 @app.get("/api/exportadores")

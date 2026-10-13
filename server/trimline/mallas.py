@@ -8,6 +8,7 @@ from __future__ import annotations
 import hashlib
 import io
 from dataclasses import dataclass, field
+from pathlib import Path
 
 import numpy as np
 import trimesh
@@ -22,6 +23,7 @@ class Malla:
     f: np.ndarray            # (M, 3) uint32
     arriba: np.ndarray       # (3,) unitario: de la base hacia los dientes
     base: float              # altura de la base sobre `arriba`
+    ruta: str | None = None  # de dónde se leyó, si se sabe (lo arrastrado al navegador no la trae)
     _tri: np.ndarray = field(repr=False, default=None)
     _arbol: cKDTree = field(repr=False, default=None)
 
@@ -34,6 +36,7 @@ class Malla:
         return {
             "id": self.id,
             "nombre": self.nombre,
+            "ruta": self.ruta,
             "vertices": int(len(self.v)),
             "caras": int(len(self.f)),
             "arriba": [float(x) for x in self.arriba],
@@ -138,10 +141,15 @@ def _detectar_base(v: np.ndarray, f: np.ndarray) -> tuple[np.ndarray, float]:
 _MALLAS: dict[str, Malla] = {}
 
 
-def cargar(datos: bytes, nombre: str) -> Malla:
+EXTENSIONES = (".stl", ".ply", ".obj")
+
+
+def cargar(datos: bytes, nombre: str, ruta: str | None = None) -> Malla:
     """Carga un STL (u otro formato de malla que lea trimesh) y lo deja indexado en memoria."""
     ident = hashlib.sha1(datos).hexdigest()[:16]
     if ident in _MALLAS:
+        if ruta:
+            _MALLAS[ident].ruta = ruta
         return _MALLAS[ident]
     ext = nombre.rsplit(".", 1)[-1].lower() if "." in nombre else "stl"
     m = trimesh.load(io.BytesIO(datos), file_type=ext, force="mesh", process=True)
@@ -150,9 +158,14 @@ def cargar(datos: bytes, nombre: str) -> Malla:
     v = np.asarray(m.vertices, dtype=np.float32)
     f = np.asarray(m.faces, dtype=np.uint32)
     arriba, base = _detectar_base(v, f)
-    malla = Malla(id=ident, nombre=nombre, v=v, f=f, arriba=arriba.astype(np.float64), base=base)
+    malla = Malla(id=ident, nombre=nombre, v=v, f=f, arriba=arriba.astype(np.float64), base=base, ruta=ruta)
     _MALLAS[ident] = malla
     return malla
+
+
+def desde_archivo(ruta: str | Path) -> Malla:
+    ruta = Path(ruta)
+    return cargar(ruta.read_bytes(), ruta.name, str(ruta.resolve()))
 
 
 def desde_binario(ident: str, nombre: str, datos: bytes, arriba, base: float) -> Malla:

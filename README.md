@@ -17,7 +17,8 @@ En Linux, desde una copia del repo:
 Arma el entorno la primera vez, levanta el servidor local y abre el navegador. En Windows se
 instala con `AlignerTrimlineSetup-<versión>.exe`, que sale de cada release.
 
-1. **Modelos.** Arrastrá los STL. El nombre dice el maxilar y el movimiento
+1. **Modelos.** Arrastrá los STL o usá "elegí carpeta" (así el trabajo guardado sabe dónde
+   están y los vuelve a leer solo). El nombre dice el maxilar y el movimiento
    (`0044 Apellido Nombre 1.0 sup 01.stl`); lo que no se reconoce se corrige en la tabla.
    Destildá los movimientos que no se usan: el primero tildado de cada maxilar es la base.
 2. **Maxilar.** Se trabaja de a uno.
@@ -32,9 +33,11 @@ instala con `AlignerTrimlineSetup-<versión>.exe`, que sale de cada release.
    `<ID>.curva` con los datos del caso (un JSON), igual que los que ya consume el generador del KUKA.
    Los escribe el programa en la carpeta elegida ("Elegir carpeta…" abre el diálogo del
    sistema; si ya hay archivos con ese nombre, pregunta antes de reemplazarlos).
-7. **Guardar.** `<ID>.trimline` es una foto entera del trabajo: puntos, keyframes, ajustes, la
-   vista y las mallas ya procesadas. Abrirlo deja todo como estaba, sin volver a arrastrar
-   los STL. Los `.trimline.json` de antes también se abren (las mallas sí hay que arrastrarlas).
+7. **Guardar.** `<ID>.trimline` es una foto del trabajo: puntos, keyframes, ajustes y la vista.
+   Las mallas no van adentro (sería mucho volumen guardando seguido): va la ruta de cada STL,
+   y al abrirlo se leen de ahí. Si no se encuentran (o se habían arrastrado, que no deja
+   saber la ruta), avisa cuáles faltan para arrastrarlos o elegir su carpeta. Los `.trimline`
+   de antes (con las mallas adentro) y los `.trimline.json` también se abren.
 
 Ctrl+Z deshace y Ctrl+Y (o Ctrl+Shift+Z) rehace; Ctrl+S guarda.
 

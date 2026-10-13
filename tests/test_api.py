@@ -69,22 +69,54 @@ def test_los_motores_vendorizados_no_se_editaron():
             assert hashlib.sha256((carpeta / ruta.strip()).read_bytes()).hexdigest() == sha, f"{motor}/{ruta} fue modificado"
 
 
-def test_guardar_y_abrir_curva(domo_stl):
+def test_guardar_y_abrir_curva(domo_stl, tmp_path):
     from trimline import mallas
-    m = cliente.post("/api/mallas", params={"nombre": "0044 Caso Prueba 1.0 sup 01.stl"}, content=domo_stl).json()
-    trabajo = {"id": "0044", "archivos": [{"malla": m["id"], "nombre": "x.stl", "maxilar": "sup", "mov": "01", "usar": True}],
+    (tmp_path / "0044 Caso Prueba 1.0 sup 01.stl").write_bytes(domo_stl)
+    (tmp_path / "notas.txt").write_text("no es un modelo")
+    c = cliente.post("/api/mallas/carpeta", json={"carpeta": str(tmp_path)}).json()
+    assert [m["nombre"] for m in c["mallas"]] == ["0044 Caso Prueba 1.0 sup 01.stl"] and not c["errores"]
+    m = c["mallas"][0]
+    assert m["archivo"]["maxilar"] == "sup" and m["ruta"].endswith("sup 01.stl")
+    trabajo = {"id": "0044", "archivos": [{"malla": m["id"], "nombre": m["nombre"], "maxilar": "sup", "mov": "01", "usar": True}],
                "maxilares": {"sup": {"offset": 0.5, "controladores": anillo(num="01"), "inversas": {"v1|v2": [0, 0, 1]}}}}
     r = cliente.post("/api/trabajo/guardar", json=trabajo)
-    assert r.status_code == 200 and r.content[:2] == b"PK"
+    assert r.status_code == 200 and r.headers["X-Sin-Ruta"] == "0"
+    assert len(r.content) < 5000                      # sin mallas adentro: solo la ruta
+    assert r.json()["archivos"][0]["ruta"] == m["ruta"]
     antes = mallas.obtener(m["id"])
     mallas.descartar(m["id"])                         # como si el programa se hubiera cerrado
     a = cliente.post("/api/trabajo/abrir", content=r.content).json()
     assert a["trabajo"]["maxilares"]["sup"]["inversas"] == {"v1|v2": [0, 0, 1]}
-    assert a["mallas"][0]["id"] == m["id"]
+    assert a["mallas"][0]["id"] == m["id"] and not a["faltan"]
     despues = mallas.obtener(m["id"])
     assert np.array_equal(antes.v, despues.v) and np.array_equal(antes.f, despues.f)
-    assert np.allclose(antes.arriba, despues.arriba)
+
+    mallas.descartar(m["id"])                         # y si el STL ya no está, avisa cuál falta
+    (tmp_path / m["nombre"]).unlink()
+    a = cliente.post("/api/trabajo/abrir", content=r.content).json()
+    assert a["trabajo"]["archivos"] == [] and a["faltan"][0]["nombre"] == m["nombre"]
     assert cliente.post("/api/trabajo/abrir", content=b"cualquier cosa").status_code == 422
+
+
+def test_guardar_sin_ruta_y_abrir_los_viejos(domo_stl):
+    import io
+    import json
+    import zipfile
+    from trimline import mallas
+    m = cliente.post("/api/mallas", params={"nombre": "0045 Otro Caso 1.0 inf 00.stl"}, content=domo_stl).json()
+    mallas.obtener(m["id"]).ruta = None               # como si se hubiera arrastrado al navegador
+    r = cliente.post("/api/trabajo/guardar", json={"id": "0045", "archivos": [{"malla": m["id"], "nombre": "x.stl"}]})
+    assert r.headers["X-Sin-Ruta"] == "1" and "ruta" not in r.json()["archivos"][0]
+    # los .trimline de la versión 2 traían las mallas en un zip
+    viejo = mallas.obtener(m["id"])
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as z:
+        z.writestr("trabajo.json", json.dumps({"formato": "aligner-trimline", "version": 2, "archivos": [{"malla": m["id"], "nombre": "x.stl"}]}))
+        z.writestr("mallas.json", json.dumps({m["id"]: {"nombre": "x.stl", "arriba": list(viejo.arriba), "base": viejo.base}}))
+        z.writestr(f"mallas/{m['id']}.bin", viejo.binario())
+    mallas.descartar(m["id"])
+    a = cliente.post("/api/trabajo/abrir", content=buf.getvalue()).json()
+    assert a["mallas"][0]["id"] == m["id"] and a["faltan"] == []
 
 
 def test_exportar_a_una_carpeta(domo_stl, tmp_path):

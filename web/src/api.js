@@ -41,16 +41,22 @@ export const instalarVersion = (tag) => enviar('/api/actualizacion/instalar', { 
 export const revertirVersion = () => enviar('/api/actualizacion/revertir');
 export const version = () => fetch('/api/version').then(json);
 
-/** El trabajo entero con sus mallas, como el contenido de un archivo .trimline (Blob). */
+/** Carga los modelos de una carpeta del disco: { carpeta, mallas: [resumen + archivo], errores }. */
+export const mallasDeCarpeta = (carpeta, nombres) => enviar('/api/mallas/carpeta', { carpeta, nombres });
+
+/**
+ * El trabajo como contenido de un archivo .trimline, sin las mallas (solo su ruta).
+ * Devuelve { blob, sinRuta }: cuántos modelos no tienen ruta conocida (se arrastraron).
+ */
 export async function guardarTrabajo(trabajo) {
   const r = await fetch('/api/trabajo/guardar', {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(trabajo),
   });
   if (!r.ok) await json(r);
-  return r.blob();
+  return { blob: await r.blob(), sinRuta: Number(r.headers.get('X-Sin-Ruta')) || 0 };
 }
 
-/** Abre un .trimline: el servidor carga sus mallas. Devuelve { trabajo, mallas: [resumen] }. */
+/** Abre un .trimline: el servidor carga los modelos que encuentra. Devuelve { trabajo, mallas: [resumen], faltan }. */
 export const abrirTrabajo = (archivo) => fetch('/api/trabajo/abrir', {
   method: 'POST', headers: { 'Content-Type': 'application/octet-stream' }, body: archivo,
 }).then(json);
