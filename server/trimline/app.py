@@ -8,8 +8,6 @@ from __future__ import annotations
 import base64
 import os
 import re
-import subprocess
-import sys
 import threading
 import time
 from pathlib import Path
@@ -321,10 +319,14 @@ def vigilar(segundos: float) -> None:
     threading.Thread(target=bucle, daemon=True).start()
 
 
+def _datos() -> Path | None:
+    return Path(os.environ["TRIMLINE_HOME"]) if os.environ.get("TRIMLINE_HOME") else None
+
+
 @app.get("/api/actualizacion")
 def actualizacion(buscar: bool = False) -> dict:
-    """Qué versión está puesta y, con buscar=true, qué releases hay en GitHub."""
-    return {**actualizar.estado(buscar), "version": __version__}
+    """Qué versión está puesta, cómo salió el último cambio y, con buscar=true, qué releases hay."""
+    return {**actualizar.estado(buscar), "version": __version__, "ultimo": actualizar.ultimo_cambio(_datos())}
 
 
 @app.post("/api/actualizacion/instalar")
@@ -333,7 +335,7 @@ def actualizacion_instalar(cuerpo: dict) -> dict:
         res = actualizar.instalar(str(cuerpo.get("tag") or ""))
     except Exception as e:  # noqa: BLE001  (red, disco o release mal armado: se le cuenta al usuario)
         raise HTTPException(status_code=422, detail=str(e)) from None
-    reiniciar()
+    reiniciar(res["modo"], res["tag"])
     return res
 
 
@@ -343,20 +345,20 @@ def actualizacion_revertir() -> dict:
         res = actualizar.revertir()
     except Exception as e:  # noqa: BLE001
         raise HTTPException(status_code=422, detail=str(e)) from None
-    reiniciar()
+    reiniciar(res["modo"], res["tag"])
     return res
 
 
-def reiniciar() -> None:
-    """Arranca el lanzador de la versión nueva y apaga este proceso un momento después."""
-    lanzador = actualizar.APP / "lanzador.py"
-    opciones = {}
-    if sys.platform == "win32":
-        opciones["creationflags"] = subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP
-    else:
-        opciones["start_new_session"] = True
-    subprocess.Popen([sys.executable, str(lanzador), "--reinicio"], cwd=str(actualizar.PROGRAMA), **opciones)  # noqa: S603
+def reiniciar(modo: str, tag: str | None) -> None:
+    """Lanza el cambio de versión (otro proceso: espera a que este suelte app/, la cambia y abre
+    el programa de nuevo) y apaga este proceso un momento después."""
+    actualizar.lanzar_cambio(modo, tag, _datos())
     threading.Timer(0.5, apagar).start()
+    # si algo traba el cierre ordenado (una conexión que no suelta, un hilo), este proceso igual
+    # se termina: si quedara vivo, seguiría atendiendo la versión vieja
+    salida = threading.Timer(10, os._exit, [0])
+    salida.daemon = True
+    salida.start()
 
 
 @app.get("/")

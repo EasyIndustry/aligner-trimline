@@ -1,6 +1,7 @@
 """Lanzador: levanta el servidor local y abre la interfaz en el navegador.
 
-    python lanzador.py            # si ya está corriendo, solo abre el navegador
+    python lanzador.py            # si ya está corriendo, solo abre el navegador (si es otra
+                                  # versión, la cierra y arranca la instalada)
     python lanzador.py --reinicio # lo usa el actualizador: espera a que el anterior termine
 
 En una instalación de Windows lo corre runtime\\AlignerTrimline.exe (pythonw con otro nombre),
@@ -15,6 +16,8 @@ from __future__ import annotations
 
 import json
 import os
+import re
+import signal
 import socket
 import sys
 import threading
@@ -41,13 +44,53 @@ def url(puerto: int) -> str:
     return f"http://127.0.0.1:{puerto}/"
 
 
-def corriendo(puerto: int) -> bool:
-    """¿Hay un aligner-trimline atendiendo en ese puerto?"""
+def version_en(puerto: int) -> str | None:
+    """La versión del aligner-trimline que atiende en ese puerto, o None si no hay ninguno."""
     try:
         with urllib.request.urlopen(url(puerto) + "api/version", timeout=2) as r:
-            return b"aligner-trimline" in r.read()
+            dato = json.loads(r.read())
+    except (OSError, ValueError):
+        return None
+    return str(dato.get("version") or "?") if dato.get("nombre") == "aligner-trimline" else None
+
+
+def corriendo(puerto: int) -> bool:
+    """¿Hay un aligner-trimline atendiendo en ese puerto?"""
+    return version_en(puerto) is not None
+
+
+def version_instalada() -> str:
+    """La versión del código que está en esta carpeta (sin importarlo: es solo leer un número)."""
+    texto = (APP / "server" / "trimline" / "__init__.py").read_text(encoding="utf-8")
+    m = re.search(r'__version__\s*=\s*"([^"]+)"', texto)
+    return m[1] if m else "?"
+
+
+def cerrar_viejo(datos: Path, puerto: int) -> None:
+    """Cierra un servidor de otra versión que quedó andando (por ejemplo, después de actualizar).
+
+    Primero se le pide que se cierre; si no lo hace, se termina su proceso (el pid queda anotado
+    en servidor.json). Así el ícono nunca abre una versión que ya no es la instalada.
+    """
+    try:
+        urllib.request.urlopen(urllib.request.Request(url(puerto) + "api/cerrar", data=b"{}", method="POST",
+                                                      headers={"Content-Type": "application/json"}), timeout=3).close()
     except OSError:
-        return False
+        pass
+    for _ in range(40):
+        if not corriendo(puerto):
+            return
+        time.sleep(0.25)
+    try:
+        pid = int(json.loads((datos / "servidor.json").read_text(encoding="utf-8"))["pid"])
+        if pid != os.getpid():
+            os.kill(pid, signal.SIGTERM)                # en Windows: TerminateProcess
+    except (OSError, ValueError, KeyError, TypeError):
+        pass
+    for _ in range(20):
+        if not corriendo(puerto):
+            return
+        time.sleep(0.25)
 
 
 def libre(puerto: int) -> bool:
@@ -96,12 +139,19 @@ def abrir_cuando_responda(puerto: int) -> None:
 
 def main() -> None:
     reinicio = "--reinicio" in sys.argv
+    abrir = not reinicio
     datos = carpeta_de_datos()
     datos.mkdir(parents=True, exist_ok=True)
     previo = int(os.environ["TRIMLINE_PORT"]) if os.environ.get("TRIMLINE_PORT") else anotado(datos)
-    if not reinicio and previo and corriendo(previo):
-        webbrowser.open(url(previo))
-        return
+    if not reinicio and previo:
+        andando = version_en(previo)
+        if andando is not None and andando == version_instalada():
+            webbrowser.open(url(previo))
+            return
+        if andando is not None:                         # quedó andando otra versión: se la cambia
+            cerrar_viejo(datos, previo)
+            reinicio = True                             # y se vuelve al mismo puerto
+            abrir = True
 
     os.environ["TRIMLINE_HOME"] = str(datos)
     if INSTALADA or sys.stdout is None:
@@ -120,7 +170,7 @@ def main() -> None:
     from trimline import app as aplicacion, bandeja
     from trimline.__main__ import main as servidor
 
-    if not reinicio:
+    if abrir:
         threading.Thread(target=abrir_cuando_responda, args=(puerto,), daemon=True).start()
     sacar_icono = bandeja.iniciar(url(puerto), APP / "web" / "icono.ico", aplicacion.apagar)
     try:

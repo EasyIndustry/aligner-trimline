@@ -31,8 +31,12 @@ def iniciar(url: str, icono: Path, cerrar: Callable[[], None]) -> Callable[[], N
         icon.stop()
         cerrar()
 
+    # cargado entero y cerrado: Image.open deja el archivo abierto hasta usarlo, y un archivo
+    # abierto dentro de app\ no deja renombrar la carpeta al actualizar
+    with Image.open(icono) as im:
+        imagen = im.copy()
     icon = pystray.Icon(
-        "AlignerTrimline", Image.open(icono), "Aligner Trimline: línea de recorte",
+        "AlignerTrimline", imagen, "Aligner Trimline: línea de recorte",
         pystray.Menu(
             pystray.MenuItem("Abrir", lambda _i, _it: webbrowser.open(url), default=True),
             pystray.MenuItem("Cerrar el programa", salir),

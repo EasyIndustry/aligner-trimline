@@ -911,6 +911,9 @@ async function pintarVersion(buscar = false) {
     $('version').textContent = a.instalada
       ? `Versión instalada: ${a.tag ?? a.version}.`
       : `Versión ${a.version} (copia de desarrollo: se actualiza con git).`;
+    if (a.ultimo && !a.ultimo.ok) {
+      $('version').textContent += ` El último cambio de versión (${a.ultimo.cuando?.replace('T', ' ')}) no se pudo hacer: ${a.ultimo.error}. Si vuelve a pasar, instalá con el instalador (.exe).`;
+    }
     const volver = /** @type {HTMLButtonElement} */ ($('volver-version'));
     volver.hidden = !a.anterior;
     volver.textContent = `Volver a ${a.anterior ?? 'la anterior'}`;
@@ -938,13 +941,18 @@ async function cambiarVersion(accion, pregunta) {
   if (!confirm(pregunta)) return;
   try {
     avisar('Instalando…');
+    const cual = async () => { const a = await api.actualizacion(); return `${a.version}|${a.tag}`; };
+    const antes = await cual();
     await accion();
-    // el servidor se reinicia: esperar a que vuelva y recargar la página con el código nuevo
-    await new Promise((r) => setTimeout(r, 1500));
-    for (let i = 0; i < 80; i++) {
-      try { await api.version(); location.reload(); return; } catch { await new Promise((r) => setTimeout(r, 500)); }
+    // el servidor se reinicia: recargar recién cuando responde la versión nueva (si se recarga
+    // antes, puede contestar todavía el proceso viejo y la página queda con el código de antes)
+    avisar('Reiniciando con la versión nueva…');
+    for (let i = 0; i < 120; i++) {
+      await new Promise((r) => setTimeout(r, 500));
+      try { if ((await cual()) !== antes) { location.reload(); return; } } catch { /* reiniciando */ }
     }
-    avisar('El programa no volvió a arrancar: abrilo de nuevo desde el acceso directo.', true);
+    avisar('El programa no terminó de reiniciarse: cerralo desde el ícono de la bandeja (abajo a la derecha) y abrilo de nuevo.', true);
+    return;
   } catch (e) { avisar(e.message, true); }
 }
 $('buscar-version').addEventListener('click', () => pintarVersion(true));

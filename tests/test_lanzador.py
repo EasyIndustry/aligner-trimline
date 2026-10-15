@@ -53,3 +53,10 @@ def test_icono_para_el_instalador():
     Image = pytest.importorskip("PIL.Image")             # Pillow solo va en Windows
     ico = Image.open(RAIZ / "web" / "icono.ico")
     assert (256, 256) in ico.info["sizes"] and (16, 16) in ico.info["sizes"]
+
+
+def test_sabe_que_version_esta_instalada():
+    import re
+    texto = (RAIZ / "server" / "trimline" / "__init__.py").read_text()
+    assert lanzador.version_instalada() == re.search(r'__version__ = "([^"]+)"', texto)[1]
+    assert lanzador.version_en(1) is None           # en el puerto 1 no hay nadie

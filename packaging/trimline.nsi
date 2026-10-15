@@ -15,6 +15,8 @@ OutFile "${SALIDA}"
 ; por usuario, sin pedir permisos de administrador
 RequestExecutionLevel user
 InstallDir "$LOCALAPPDATA\Programs\AlignerTrimline"
+; reinstalar va a la misma carpeta que la vez anterior (si se eligió otra)
+InstallDirRegKey HKCU "${CLAVE_REG}" "InstallLocation"
 
 !define MUI_FINISHPAGE_RUN
 !define MUI_FINISHPAGE_RUN_TEXT "Abrir ${NOMBRE} ahora"
@@ -23,12 +25,21 @@ InstallDir "$LOCALAPPDATA\Programs\AlignerTrimline"
 !define MUI_FINISHPAGE_SHOWREADME_TEXT "Crear un acceso directo en el escritorio"
 !define MUI_FINISHPAGE_SHOWREADME_FUNCTION AccesoEscritorio
 
+; si ya está instalado no se pregunta dónde: se actualiza esa carpeta (InstallDirRegKey)
+!define MUI_PAGE_CUSTOMFUNCTION_PRE SiYaEstaNoPreguntar
 !insertmacro MUI_PAGE_DIRECTORY
 !insertmacro MUI_PAGE_INSTFILES
 !insertmacro MUI_PAGE_FINISH
 !insertmacro MUI_UNPAGE_CONFIRM
 !insertmacro MUI_UNPAGE_INSTFILES
 !insertmacro MUI_LANGUAGE "Spanish"
+
+Function SiYaEstaNoPreguntar
+  ReadRegStr $0 HKCU "${CLAVE_REG}" "InstallLocation"
+  StrCmp $0 "" +3
+  IfFileExists "$0\app\lanzador.py" 0 +2
+  Abort
+FunctionEnd
 
 Function Lanzar
   SetOutPath "$INSTDIR"
@@ -43,8 +54,15 @@ FunctionEnd
 Section "Programa"
   ; si está abierto no se pueden reemplazar los archivos
   nsExec::Exec 'taskkill /F /IM AlignerTrimline.exe'
+  Sleep 1500                      ; que Windows suelte los archivos del proceso cerrado
   RMDir /r "$INSTDIR\app"
   RMDir /r "$INSTDIR\runtime"
+  ; lo que pudo dejar una actualización a medias
+  RMDir /r "$INSTDIR\app.nueva"
+  RMDir /r "$INSTDIR\app.anterior"
+  RMDir /r "$INSTDIR\app.cambio"
+  RMDir /r "$INSTDIR\app.bajando"
+  Delete "$INSTDIR\cambio.py"
   SetOutPath "$INSTDIR"
   File /r "${CARGA}\*.*"
 
@@ -68,6 +86,8 @@ Section "Uninstall"
   RMDir /r "$INSTDIR\app"
   RMDir /r "$INSTDIR\app.anterior"
   RMDir /r "$INSTDIR\app.nueva"
+  RMDir /r "$INSTDIR\app.cambio"
+  Delete "$INSTDIR\cambio.py"
   Delete "$INSTDIR\app-release.json"
   Delete "$INSTDIR\Desinstalar.exe"
   RMDir "$INSTDIR"

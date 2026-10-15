@@ -11,9 +11,10 @@ Se consulta la API de GitHub sin cuenta, que tiene un límite de 60 pedidos por 
 oficina entera sale por la misma). Si falla, por eso o por lo que sea, se usan las páginas
 públicas, que no tienen ese límite: el feed releases.atom y el .tar.gz del tag.
 
-Actualizar baja el código del release elegido, lo revisa y cambia app/ por el nuevo. Las
-librerías de Python no se actualizan así: si un release pide una nueva, hay que bajar su
-instalador (se avisa antes de instalar).
+Actualizar baja el código del release elegido a app.nueva/ y lo revisa; el cambio de carpetas
+lo hace cambio.py, en un proceso aparte, cuando el servidor ya se cerró (Windows no deja
+renombrar app/ mientras el programa tiene algo abierto adentro). Las librerías de Python no se
+actualizan así: si un release pide una nueva, hay que bajar su instalador (se avisa antes).
 """
 from __future__ import annotations
 
@@ -181,40 +182,46 @@ def preparar(tag: str) -> tuple[Path, list[str]]:
     return nueva, avisos
 
 
-def aplicar(nueva: Path, tag: str) -> None:
-    """Cambia app/ por la nueva y deja la de antes en app.anterior/."""
-    previo = marca().get("tag")
-    shutil.rmtree(ANTERIOR, ignore_errors=True)
-    APP.rename(ANTERIOR)
-    try:
-        nueva.rename(APP)
-    except OSError:
-        ANTERIOR.rename(APP)                             # no se pudo: todo queda como estaba
-        raise
-    MARCA.write_text(json.dumps({"tag": tag, "applied_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
-                                 "source": "actualizador", "previous_tag": previo}, indent=1), encoding="utf-8")
-
-
 def instalar(tag: str) -> dict:
+    """Deja la versión lista en app.nueva/; el cambio lo hace cambio.py al reiniciar."""
     if not instalada():
         raise ValueError("esto es un checkout de desarrollo: se actualiza con git")
     nueva, avisos = preparar(tag)
     if avisos:
         shutil.rmtree(nueva, ignore_errors=True)
         raise ValueError(" ".join(avisos))
-    aplicar(nueva, tag)
-    return {"tag": tag}
+    return {"tag": tag, "modo": "instalar"}
 
 
 def revertir() -> dict:
     if not instalada() or not ANTERIOR.exists():
         raise ValueError("no hay una versión anterior guardada")
-    m = marca()
-    aparte = PROGRAMA / "app.cambio"
-    shutil.rmtree(aparte, ignore_errors=True)
-    APP.rename(aparte)
-    ANTERIOR.rename(APP)
-    aparte.rename(ANTERIOR)
-    MARCA.write_text(json.dumps({"tag": m.get("previous_tag"), "applied_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
-                                 "source": "vuelta atrás", "previous_tag": m.get("tag")}, indent=1), encoding="utf-8")
-    return {"tag": m.get("previous_tag")}
+    return {"tag": marca().get("previous_tag"), "modo": "revertir"}
+
+
+def lanzar_cambio(modo: str, tag: str | None, datos: Path | None) -> None:
+    """Arranca cambio.py desde una copia fuera de app/: espera a que este proceso suelte la
+    carpeta, la cambia y vuelve a abrir el programa."""
+    import subprocess
+    import sys
+    copia = PROGRAMA / "cambio.py"
+    shutil.copyfile(Path(__file__).with_name("cambio.py"), copia)
+    orden = [sys.executable, str(copia), "--programa", str(PROGRAMA), "--modo", modo]
+    if tag:
+        orden += ["--tag", tag]
+    if datos:
+        orden += ["--datos", str(datos)]
+    opciones = {}
+    if sys.platform == "win32":
+        opciones["creationflags"] = subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP
+    else:
+        opciones["start_new_session"] = True
+    subprocess.Popen(orden, cwd=str(PROGRAMA), **opciones)  # noqa: S603
+
+
+def ultimo_cambio(datos: Path | None) -> dict | None:
+    """Cómo salió el último cambio de versión (lo anota cambio.py), si hay."""
+    try:
+        return json.loads((datos / "actualizacion.json").read_text(encoding="utf-8")) if datos else None
+    except (OSError, ValueError):
+        return None

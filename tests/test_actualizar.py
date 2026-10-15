@@ -52,3 +52,61 @@ def test_valida_con_los_certificados_del_sistema(monkeypatch):
     monkeypatch.setattr(builtins, "__import__", lambda n, *a, **k: (_ for _ in ()).throw(ImportError(n)) if n == "truststore" else importar(n, *a, **k))
     c = actualizar._contexto()
     assert isinstance(c, ssl.SSLContext) and not isinstance(c, truststore.SSLContext)
+
+
+def _programa(tmp_path, tag="v0.1.0"):
+    import json
+    for d, txt in (("app", "vieja"), ("app.nueva", "nueva")):
+        (tmp_path / d).mkdir()
+        (tmp_path / d / "version.txt").write_text(txt)
+    (tmp_path / "app-release.json").write_text(json.dumps({"tag": tag}))
+    return tmp_path
+
+
+def test_cambio_de_version_y_vuelta(tmp_path):
+    import json
+    from trimline import cambio
+    p = _programa(tmp_path)
+    assert cambio.cambiar(p, "instalar", "v0.3.1") == "v0.3.1"
+    assert (p / "app" / "version.txt").read_text() == "nueva"
+    assert (p / "app.anterior" / "version.txt").read_text() == "vieja" and not (p / "app.nueva").exists()
+    marca = json.loads((p / "app-release.json").read_text())
+    assert (marca["tag"], marca["previous_tag"]) == ("v0.3.1", "v0.1.0")
+    assert cambio.cambiar(p, "revertir", None) == "v0.1.0"
+    assert (p / "app" / "version.txt").read_text() == "vieja"
+    assert (p / "app.anterior" / "version.txt").read_text() == "nueva"
+
+
+def test_cambio_que_no_se_puede_deja_todo_como_estaba(tmp_path, monkeypatch):
+    import pytest
+    from trimline import cambio
+    p = _programa(tmp_path)
+    monkeypatch.setattr(cambio, "ESPERA", 0.2)
+    original = cambio.Path.rename
+
+    def rename(self, destino):                     # app.nueva → app no se deja (como un antivirus)
+        if self.name == "app.nueva":
+            raise PermissionError(5, "Acceso denegado")
+        return original(self, destino)
+
+    monkeypatch.setattr(cambio.Path, "rename", rename)
+    with pytest.raises(PermissionError):
+        cambio.cambiar(p, "instalar", "v0.3.1")
+    assert (p / "app" / "version.txt").read_text() == "vieja" and (p / "app.nueva").exists()
+
+
+def test_reintenta_mientras_la_carpeta_esta_tomada(tmp_path, monkeypatch):
+    from trimline import cambio
+    p = _programa(tmp_path)
+    original, intentos = cambio.Path.rename, []
+
+    def rename(self, destino):                     # las dos primeras veces Windows dice que no
+        intentos.append(self.name)
+        if self.name == "app" and intentos.count("app") <= 2:
+            raise PermissionError(5, "Acceso denegado")
+        return original(self, destino)
+
+    monkeypatch.setattr(cambio.Path, "rename", rename)
+    monkeypatch.setattr(cambio.time, "sleep", lambda s: None)
+    assert cambio.cambiar(p, "instalar", "v0.3.1") == "v0.3.1"
+    assert intentos.count("app") == 3
