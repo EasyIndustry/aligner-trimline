@@ -21,6 +21,17 @@ export const referencia = (archivo) => fetch(`/api/referencia?nombre=${encodeURI
   method: 'POST', headers: { 'Content-Type': 'text/plain' }, body: archivo,
 }).then(json);
 
+/** Sube la segmentación de teethseg (.json o .npy) de una malla: { piezas, propuesta: [{ id, tipo, pos, pieza }] }. */
+export const subirEtiquetas = (malla, archivo) => fetch(`/api/mallas/${malla}/etiquetas`, {
+  method: 'POST', headers: { 'Content-Type': 'application/octet-stream' }, body: archivo,
+}).then(json);
+/** La pieza de cada cara de la malla (Uint16Array). */
+export async function bajarEtiquetas(malla) {
+  const r = await fetch(`/api/mallas/${malla}/etiquetas/bin`);
+  if (!r.ok) throw new Error('no se pudo bajar la segmentación');
+  return new Uint16Array(await r.arrayBuffer());
+}
+
 /** La malla ya soldada, con la misma numeración que usa el servidor: { posiciones, indices }. */
 export async function bajarMalla(id) {
   const r = await fetch(`/api/mallas/${id}/bin`);

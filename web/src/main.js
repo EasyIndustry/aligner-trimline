@@ -35,6 +35,8 @@ const esInversa = (id) => !!id?.startsWith('i:');
 const curvas = { sup: {}, inf: {} };
 /** Lo que traía un trabajo abierto, para reconocer sus modelos cuando se arrastren. */
 let pendientes = /** @type {any[]} */ ([]);
+/** Segmentaciones cargadas, por malla: { piezas, propuesta: [{ id, tipo, pos, pieza }] }. */
+const segmentaciones = /** @type {Record<string, { piezas: number, propuesta: any[] }>} */ ({});
 /** Curvas de referencia importadas de un .pts, por 'maxilar|mov': [x, y, z, ...]. Solo se miran. */
 let referencias = /** @type {Record<string, number[]>} */ ({});
 
@@ -68,14 +70,16 @@ const paraServidor = (maxilar) => ({ ...estado.maxilares[maxilar], movimientos: 
 async function cargarArchivos(lista) {
   const pts = [...lista].filter((a) => /\.pts$/i.test(a.name));
   if (pts.length) await cargarReferencias(pts);
+  const seg = [...lista].filter((a) => /(_etiquetas\.json|_labels_por_cara\.npy)$/i.test(a.name));
   const archivos = [...lista].filter((a) => /\.(stl|ply|obj)$/i.test(a.name));
-  if (!archivos.length) return;
+  if (!archivos.length) { for (const a of seg) await cargarSegmentacion(a); return; }
   let hechos = 0;
   for (const archivo of archivos) {
     avisar(`Cargando ${++hechos} de ${archivos.length}: ${archivo.name}`);
     try { await agregarMalla(await api.subirMalla(archivo)); } catch (e) { avisar(String(e.message ?? e), true); }
   }
   finCarga();
+  for (const a of seg) await cargarSegmentacion(a);
 }
 
 /** Carga los modelos de una carpeta: el servidor los lee del disco y sabe dónde están (va al .trimline). */
@@ -130,6 +134,51 @@ async function cargarReferencias(lista) {
     } catch (e) { avisar(String(e.message ?? e), true); }
   }
   pintarPanel(); mostrar();
+}
+
+// ---------- segmentación (teethseg): el modelo pintado por diente y los puntos propuestos ----------
+const verSeg = () => /** @type {HTMLInputElement} */ ($('ver-segmentacion')).checked;
+
+/**
+ * Las etiquetas de teethseg van a la malla cuyo nombre empieza igual que el archivo
+ * ("X_etiquetas.json" → "X.stl"); si ninguna, a la del movimiento que se mira.
+ */
+async function cargarSegmentacion(archivo) {
+  const raiz = archivo.name.replace(/(_etiquetas\.json|_labels_por_cara\.npy|\.json|\.npy)$/i, '');
+  const de = estado.archivos.find((a) => a.nombre.replace(/\.[^.]+$/, '') === raiz);
+  const malla = de?.malla ?? movimientos(estado.maxilar ?? '').find((m) => m.num === estado.num)?.malla;
+  if (!malla) { avisar('Cargá primero el modelo de esa segmentación', true); return; }
+  try {
+    avisar('Leyendo la segmentación…');
+    const r = await api.subirEtiquetas(malla, archivo);
+    segmentaciones[malla] = r;
+    visor.segmentacion(malla, await api.bajarEtiquetas(malla));
+    /** @type {HTMLInputElement} */ ($('ver-segmentacion')).checked = true;
+    visor.verSegmentacion(true);
+    if (de && de.maxilar && (de.maxilar !== estado.maxilar || de.mov !== estado.num)) {
+      if (de.maxilar !== estado.maxilar) elegirMaxilar(de.maxilar, true);
+      irA(de.mov);
+    }
+    const cuenta = (t) => r.propuesta.filter((p) => p.tipo === t).length;
+    avisar(`Segmentación: ${r.piezas} piezas; propone ${cuenta('v')} vestibulares, ${cuenta('l')} linguales y ${cuenta('e')} extremos`);
+  } catch (e) { avisar(`No se pudo leer la segmentación: ${e.message}`, true); }
+  pintarPanel(); mostrar();
+}
+
+/** Reemplaza los puntos del maxilar por los propuestos, en el movimiento base. */
+function usarPropuesta() {
+  const max = actual(), mov = movimientos(estado.maxilar ?? '').find((m) => m.num === estado.num);
+  const seg = mov && segmentaciones[mov.malla];
+  if (!max || !seg) return;
+  if (max.controladores.length && !confirm(`Se reemplazan los ${max.controladores.length} puntos de este maxilar por los ${seg.propuesta.length} propuestos. ¿Seguir? (Ctrl+Z lo deshace)`)) return;
+  recordar();
+  const b = base(estado.maxilar);
+  max.controladores = seg.propuesta.map((p) => ({ id: `${p.id}-${Date.now().toString(36)}`, tipo: p.tipo, claves: { [b]: p.pos } }));
+  max.inversas = {};
+  estado.seleccion = null; estado.elegidos = new Set();
+  if (estado.num !== b) irA(b);
+  pintarPanel(); resolverTodo();
+  avisar('Puntos propuestos aplicados: revisalos y ajustá la curva');
 }
 
 /** Cuánto se separa la referencia de la curva: para cada punto de la referencia, la distancia a la curva. */
@@ -193,6 +242,7 @@ function mostrar() {
   visor.mostrar(mov?.malla ?? null);
   visor.dibujar(mov ? curvas[estado.maxilar][estado.num] ?? null : null, estado.seleccion, estado.elegidos);
   visor.referencia(mov ? referencias[`${estado.maxilar}|${estado.num}`] ?? null : null);
+  visor.propuesta(mov && verSeg() ? segmentaciones[mov.malla]?.propuesta ?? null : null);
   pintarHud();
 }
 
@@ -583,6 +633,11 @@ function pintarPanel() {
     caja.indeterminate = siguen > 0 && siguen < elegidos.length;
   }
   pintarReferencias();
+  const mov = estado.maxilar ? movimientos(estado.maxilar).find((m) => m.num === estado.num) : null;
+  const seg = mov ? segmentaciones[mov.malla] : null;
+  /** @type {HTMLButtonElement} */ ($('usar-propuesta')).disabled = !seg;
+  /** @type {HTMLInputElement} */ ($('ver-segmentacion')).disabled = !seg;
+  $('info-segmentacion').textContent = seg ? `${seg.piezas} piezas` : '';
   pintarHud();
 }
 
@@ -690,6 +745,10 @@ ponerOpacidad(Number(guardado('trimline.opacidad')) || 1);
 const soltarEn = $('soltar');
 $('elegir').addEventListener('click', () => $('archivos').click());
 $('elegir-modelos').addEventListener('click', cargarCarpeta);
+$('elegir-segmentacion').addEventListener('click', () => $('archivo-segmentacion').click());
+$('archivo-segmentacion').addEventListener('change', (ev) => { const el = /** @type {HTMLInputElement} */ (ev.target); const a = el.files?.[0]; el.value = ''; if (a) cargarSegmentacion(a); });
+$('ver-segmentacion').addEventListener('change', () => { visor.verSegmentacion(verSeg()); mostrar(); });
+$('usar-propuesta').addEventListener('click', usarPropuesta);
 $('elegir-referencia').addEventListener('click', () => $('archivo-referencia').click());
 $('archivo-referencia').addEventListener('change', (ev) => { const el = /** @type {HTMLInputElement} */ (ev.target); cargarReferencias([...(el.files ?? [])]); el.value = ''; });
 $('quitar-referencias').addEventListener('click', () => { referencias = {}; pintarPanel(); mostrar(); });

@@ -101,6 +101,17 @@
           <button id="borrar-clave" type="button" title="Tecla K">Quitar keyframe</button>
           <button id="restablecer" type="button" title="Vuelve a las tangentes calculadas">Restablecer festón</button>
         </div>
+        <h2>Segmentación</h2>
+        <p class="nota">Las etiquetas de teethseg (<code>_etiquetas.json</code> o <code>_labels_por_cara.npy</code>) pintan cada diente y proponen dónde va cada punto. También se pueden arrastrar.</p>
+        <div class="botones cols-2">
+          <button id="elegir-segmentacion" type="button">Cargar segmentación…</button>
+          <button id="usar-propuesta" class="principal" type="button" disabled title="Reemplaza los puntos de este maxilar por los propuestos (Ctrl+Z lo deshace)">Usar los propuestos</button>
+        </div>
+        <input id="archivo-segmentacion" type="file" accept=".json,.npy" hidden />
+        <div class="fila" id="ver-seg">
+          <label><input id="ver-segmentacion" type="checkbox" checked disabled /> Ver la segmentación</label>
+          <span class="nota" id="info-segmentacion"></span>
+        </div>
         <p class="nota">Shift + clic suma o saca un punto de la selección; shift + arrastrar en un lugar vacío elige todos los del rectángulo. Sin offset o sin festoneado, el diente no se mueve con ese deslizador y la curva va recta.</p>
       </section>
 

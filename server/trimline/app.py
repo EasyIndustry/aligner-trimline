@@ -19,7 +19,7 @@ from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
-from . import __version__, actualizar, curva, dialogos, mallas, nombres, proyecto, snapshot
+from . import __version__, actualizar, curva, dialogos, mallas, nombres, proponer, proyecto, snapshot
 from .exportar import EXPORTADORES, ORDEN_MAXILARES, exportar
 
 WEB = Path(os.environ.get("TRIMLINE_WEB") or Path(__file__).resolve().parents[2] / "web")
@@ -63,6 +63,33 @@ def malla_binaria(ident: str) -> Response:
         return Response(mallas.obtener(ident).binario(), media_type="application/octet-stream")
     except KeyError as e:
         raise _error(e) from None
+
+
+@app.post("/api/mallas/{ident}/etiquetas")
+async def subir_etiquetas(ident: str, request: Request) -> dict:
+    """Recibe la segmentación de teethseg (cuerpo crudo: .json o .npy) y propone los puntos."""
+    try:
+        malla = mallas.obtener(ident)
+        lab = proponer.leer_etiquetas(await request.body())
+        propuesta = proponer.proponer(malla, lab)
+    except KeyError as e:
+        raise _error(e) from None
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e)) from None
+    malla.etiquetas = lab
+    return {"piezas": int(len(set(lab.tolist()) - {0})), "propuesta": propuesta}
+
+
+@app.get("/api/mallas/{ident}/etiquetas/bin")
+def etiquetas_binarias(ident: str) -> Response:
+    """La pieza de cada cara (uint16), en el orden de las caras de /bin."""
+    try:
+        lab = mallas.obtener(ident).etiquetas
+    except KeyError as e:
+        raise _error(e) from None
+    if lab is None:
+        raise HTTPException(status_code=404, detail="esa malla no tiene segmentación")
+    return Response(lab.astype("<u2").tobytes(), media_type="application/octet-stream")
 
 
 def _json_curva(r: dict) -> dict:

@@ -74,3 +74,6 @@ tr.base td.nombre { font-weight: 600; }
 tr.sin td { color: #999; }
 #referencias { padding-left: 18px; }
 #referencias:empty { display: none; }
+#ver-seg { justify-content: flex-start; }
+#ver-seg input { width: auto; margin: 0 4px 0 0; vertical-align: middle; }
+code { font-size: 12px; }
