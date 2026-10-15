@@ -27,6 +27,12 @@ def test_nombres():
     c = nombres.interpretar("28-07-2022_16-29-03_Subsetup10_Mandibular.stl")
     assert (c["maxilar"], c["movimiento"]) == ("inf", "10")
     assert nombres.interpretar("cualquiera.stl")["maxilar"] is None
+    e = nombres.interpretar("BZ254-L22-A-solido.stl")
+    assert (e["id"], e["maxilar"], e["movimiento"], e["tipo"]) == ("BZ254", "inf", "22", "A")
+    f = nombres.interpretar("BZ254-U06-A-solido (1).stl")
+    assert (f["id"], f["maxilar"], f["movimiento"]) == ("BZ254", "sup", "06")
+    g = nombres.interpretar("XY12-u3.stl")                     # sin tipo ni texto
+    assert (g["id"], g["maxilar"], g["movimiento"]) == ("XY12", "sup", "03")
 
 
 def test_base_y_malla_soldada(malla):
@@ -132,6 +138,11 @@ def test_exportar_pts(malla):
     sueltos = exportar("pts-por-curva", trabajo)
     assert [f["nombre"] for f in sueltos][:3] == ["BN595_inf_00.pts", "BN595_inf_01.pts", "BN595_sup_00.pts"]
     assert len(sueltos[0]["texto"].strip().split("\r\n")) == 50
+    # con el modelo de cada movimiento, cada archivo se llama como su modelo
+    for i, x in enumerate(movs):
+        x["modelo"] = f"BZ254-U{x['num']}-A-solido.stl"
+    sueltos = exportar("pts-por-curva", {"id": "BZ254", "datos": datos, "maxilares": {"sup": movs}})
+    assert [f["nombre"] for f in sueltos][:2] == ["BZ254-U00-A-solido.pts", "BZ254-U01-A-solido.pts"]
 
 
 def test_numeros_como_los_del_kuka():
@@ -219,3 +230,31 @@ def test_manija_de_un_extremo(malla):
     i = next(k for k, info in enumerate(r["info"]) if info.get("id") == m["controladores"][-1]["id"])
     assert np.allclose(r["manijas"][i, 0] - r["claves"][i], [0, 0, 2.5])
     assert not np.allclose(r["puntos"], antes["puntos"], atol=1e-3)
+
+
+def test_atras_el_orden_no_hace_lazo():
+    # Arcada de un caso real (en el plano): el último lingual de +x está más atrás y más afuera
+    # que su vecino, y por ángulo quedaba antes que él: la curva iba y volvía.
+    c = lambda i, t, x, y: {"id": i, "tipo": t, "pos": np.array([x, y, 10.0])}
+    v = [c(f"v{k}", "v", x, y) for k, (x, y) in enumerate(
+        [(-26, -17), (-23, -3), (-17, 9), (-4, 17), (11, 15), (21, 3), (28, -16), (30, -22)])]
+    lin = [c("l1", "l", 24.8, -28.2), c("l2", "l", 20, -24.1), c("l3", "l", 15, -13.7),
+           c("l4", "l", 11, 0.4), c("l5", "l", 0, 9.5), c("l6", "l", -11, 0.7), c("l7", "l", -16, -20.7)]
+    ext = [c("e1", "e", -23.5, -25.8), c("e2", "e", 28.6, -28.4)]
+    tramo = curva.ordenar(v + lin + ext, np.array([0, 0, -1.0]))["tramos"][0]
+    ids = [x["id"] for x in tramo]
+    assert ids == ["e1"] + [x["id"] for x in v] + ["e2"] + [x["id"] for x in lin]
+
+
+def test_lingual_con_sus_propios_ajustes(malla):
+    igual = proyecto.resolver(maxilar(malla, amplitud=2.0), "00")["tramos"][0]
+    mismo = proyecto.resolver(maxilar(malla, amplitud=2.0, lingual={"amplitud": 2.0}), "00")["tramos"][0]
+    assert np.allclose(igual["claves"], mismo["claves"])            # el lingual igual al general no cambia nada
+    otro = proyecto.resolver(maxilar(malla, amplitud=2.0, lingual={"amplitud": 0.0, "offset": 1.0}), "00")["tramos"][0]
+    for info, a, b in zip(igual["info"], igual["claves"], otro["claves"]):
+        if info["tipo"] == "v":
+            assert np.allclose(a, b, atol=1e-9)                      # el vestibular no se toca
+        elif info["tipo"] == "l":
+            assert not np.allclose(a, b, atol=1e-3)
+    aj = curva.ajustes(0.0, 2.0, 0.4, {"amplitud": 0.0, "ancho": 0.6})
+    assert aj["e"] == {"offset": 0.0, "amplitud": 1.0, "ancho": 0.5}   # los extremos, a mitad

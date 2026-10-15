@@ -17,9 +17,9 @@ const TRIANGULO = new THREE.BufferGeometry().setAttribute('position',
 
 /**
  * @param {any} motor el motor de render
- * @param {{ alMovimiento: (num: string) => void, alDeslizar: (id: string, valor: number, final: boolean) => void }} avisos
+ * @param {{ alMovimiento: (num: string) => void, alDeslizar: (id: string, valor: number, final: boolean) => void, alBoton?: (id: string) => void }} avisos
  */
-export function crearHud(motor, { alMovimiento, alDeslizar }) {
+export function crearHud(motor, { alMovimiento, alDeslizar, alBoton }) {
   const grupo = new THREE.Group();
   grupo.matrixAutoUpdate = false;
   grupo.renderOrder = 1000;
@@ -116,10 +116,16 @@ export function crearHud(motor, { alMovimiento, alDeslizar }) {
   }
 
   function pintarDeslizadores(W, H) {
-    const cant = Math.max(modelo.deslizadores.length, 1);
-    const ancho = Math.min(240, (W - MARGEN * 2 - 40 * (cant - 1)) / cant);
-    modelo.deslizadores.forEach((d, i) => {
-      const x0 = MARGEN + i * (ancho + 40), x1 = x0 + ancho, y = H - 112;
+    // en filas (d.fila: 0 abajo, 1 arriba); a la derecha de la fila de abajo, los botones
+    const porFila = Math.max(1, ...modelo.deslizadores.map((d) => modelo.deslizadores.filter((e) => (e.fila ?? 0) === (d.fila ?? 0)).length));
+    const lugarBotones = (modelo.botones?.length ?? 0) * 44;
+    const ancho = Math.min(240, (W - MARGEN * 2 - lugarBotones - 40 * (porFila - 1)) / porFila);
+    const enFila = new Map();
+    const yDe = (fila) => H - 112 - fila * 54;
+    modelo.deslizadores.forEach((d) => {
+      const fila = d.fila ?? 0, i = enFila.get(fila) ?? 0;
+      enFila.set(fila, i + 1);
+      const x0 = MARGEN + i * (ancho + 40), x1 = x0 + ancho, y = yDe(fila);
       const t = (d.valor - d.min) / (d.max - d.min);
       rect(x0 - 16, y - 30, ancho + 32, 46, COLOR.fondo, 0.6);
       rect(x0, y - 0.75, ancho, 1.5, COLOR.linea);
@@ -130,6 +136,13 @@ export function crearHud(motor, { alMovimiento, alDeslizar }) {
       const signo = d.valor > 0 ? '+' : '';
       texto(`${d.titulo}  ${d.sinSigno ? '' : signo}${d.valor.toFixed(2)} ${d.unidad ?? ''}`, x0, y - 20, { px: 12 });
       zonas.push({ tipo: 'deslizador', id: d.id, x0, x1, y, d });
+    });
+    (modelo.botones ?? []).forEach((b, i) => {
+      const x0 = MARGEN + porFila * (ancho + 40) - 8 + i * 44, y = yDe(0) - 7;
+      rect(x0, y - 16, 34, 34, b.activo ? COLOR.cursor : COLOR.fondo, b.activo ? 0.85 : 0.6);
+      texto(b.texto, x0 + 17, y + 1, { alinear: 0.5, px: 17 });
+      if (b.leyenda) texto(b.leyenda, x0 + 17, y + 28, { alinear: 0.5, px: 10, color: '#bbbbbb' });
+      zonas.push({ tipo: 'boton', id: b.id, x0, x1: x0 + 34, y, d: b });
     });
   }
 
@@ -174,11 +187,17 @@ export function crearHud(motor, { alMovimiento, alDeslizar }) {
   motor.onResize(() => pintar());
 
   return {
-    /** Qué mostrar: { linea: { titulo, nums, actual, claves: Set, clavesSel: Set }, deslizadores: [{ id, titulo, min, max, paso, valor, unidad }] } */
+    /**
+     * Qué mostrar: { linea: { titulo, nums, actual, claves: Set, clavesSel: Set },
+     *   deslizadores: [{ id, titulo, min, max, paso, valor, unidad, fila? }],
+     *   botones?: [{ id, texto, leyenda?, activo? }] }
+     */
     definir(m) { modelo = m; pintar(); },
     /** true si el clic cayó en un control (y entonces no es de la malla). */
     bajar(x, y) {
-      const zona = zonas.find((z) => x >= z.x0 - 12 && x <= z.x1 + 12 && Math.abs(y - z.y) <= BANDA);
+      const boton = zonas.find((z) => z.tipo === 'boton' && x >= z.x0 && x <= z.x1 && Math.abs(y - z.y) <= 18);
+      if (boton) { alBoton?.(/** @type {string} */ (boton.id)); return true; }
+      const zona = zonas.find((z) => z.tipo !== 'boton' && x >= z.x0 - 12 && x <= z.x1 + 12 && Math.abs(y - z.y) <= BANDA);
       if (!zona) return false;
       arrastre = zona.tipo === 'linea' ? { tipo: 'linea' } : { tipo: 'deslizador', id: zona.id };
       aplicar(zona, x, false);

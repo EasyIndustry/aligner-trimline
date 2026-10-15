@@ -54,8 +54,30 @@ def ordenar(controladores: list[dict], arriba: np.ndarray) -> dict:
     ext = sorted(ext[:2], key=t)
     return {
         "cerrada": True,
-        "tramos": [[ext[0]] + sorted(v, key=t) + [ext[1]] + sorted(lin, key=t, reverse=True)],
+        "tramos": [[ext[0]] + _desenredar(sorted(v, key=t), ext[0], ext[1], plano)
+                   + [ext[1]] + _desenredar(sorted(lin, key=t, reverse=True), ext[1], ext[0], plano)],
     }
+
+
+def _desenredar(lado: list[dict], desde: dict, hasta: dict, plano) -> list[dict]:
+    """Corrige el orden por ángulo donde se cruza (2-opt: el camino más corto de extremo a extremo).
+
+    El ángulo alrededor del centro de la arcada ordena bien casi todo, pero atrás, donde la arcada
+    se curva hacia el extremo, un punto más distal y más afuera puede quedar con menos ángulo que
+    su vecino: la curva iba y volvía y hacía un lazo.
+    """
+    p = [plano(desde)] + [plano(c) for c in lado] + [plano(hasta)]
+    orden = list(range(len(p)))
+    d = lambda i, j: float(np.linalg.norm(p[orden[i]] - p[orden[j]]))
+    mejoro = True
+    while mejoro:
+        mejoro = False
+        for i in range(len(orden) - 3):
+            for j in range(i + 2, len(orden) - 1):
+                if d(i, j) + d(i + 1, j + 1) < d(i, i + 1) + d(j, j + 1) - 1e-9:
+                    orden[i + 1:j + 1] = orden[j:i:-1]
+                    mejoro = True
+    return [lado[k - 1] for k in orden[1:-1]]
 
 
 def clave_inversa(a: str, b: str) -> str:
@@ -63,10 +85,23 @@ def clave_inversa(a: str, b: str) -> str:
     return "|".join(sorted((a, b)))
 
 
-def _claves(tramo: list[dict], arriba: np.ndarray, offset: float, amplitud: float, cerrada: bool,
+def ajustes(offset: float, amplitud: float, ancho: float, lingual: dict | None = None) -> dict:
+    """Offset, festoneado y ancho de festón para cada tipo de controlador.
+
+    Valen para los dos lados salvo que venga `lingual` ({offset, amplitud, ancho}, lo que falte
+    sale de los generales): entonces los generales son los del lado vestibular. Los extremos,
+    que unen los dos lados, van con el promedio.
+    """
+    v = {"offset": float(offset), "amplitud": float(amplitud), "ancho": float(ancho)}
+    lin = {k: float((lingual or {}).get(k, x)) for k, x in v.items()}
+    return {"v": v, "l": lin, "e": {k: (v[k] + lin[k]) / 2 for k in v}}
+
+
+def _claves(tramo: list[dict], arriba: np.ndarray, aj: dict, cerrada: bool,
             inversas: dict | None = None) -> tuple[np.ndarray, list[dict]]:
     """Los puntos por donde pasa la curva: crestas y crestas inversas, ya desplazados.
 
+    `aj` son los ajustes de cada tipo de controlador (ver `ajustes`).
     Un controlador con `offset: False` no se desplaza con el offset global, y uno con
     `festoneado: False` no festonea: la cresta inversa entre dos así queda recta. Entre uno que
     sí y uno que no, va a mitad de camino. `inversas[clave_inversa(a, b)]` es lo que el usuario
@@ -78,6 +113,7 @@ def _claves(tramo: list[dict], arriba: np.ndarray, offset: float, amplitud: floa
     usa = lambda c, k: 1.0 if c.get(k, True) is not False else 0.0
     for i, c in enumerate(tramo):
         p = np.asarray(c["pos"], dtype=np.float64)
+        offset, amplitud = aj[c["tipo"]]["offset"], aj[c["tipo"]]["amplitud"]
         pts.append(p + offset * usa(c, "offset") * arriba)
         info.append({"clase": "cresta", "id": c["id"], "tipo": c["tipo"]})
         if i + 1 == n and not cerrada:
@@ -98,7 +134,7 @@ ANCHO_TOTAL = 0.8            # cresta + cresta inversa: lo que gana una lo pierd
 ANCHO_EXTREMO = 0.33
 
 
-def _manijas(claves: np.ndarray, info: list[dict], arriba: np.ndarray, ancho: float,
+def _manijas(claves: np.ndarray, info: list[dict], arriba: np.ndarray, aj: dict,
              propias: dict, cerrada: bool) -> np.ndarray:
     """Las dos manijas Bézier de cada clave: (K, 2, 3), la de entrada y la de salida.
 
@@ -117,6 +153,7 @@ def _manijas(claves: np.ndarray, info: list[dict], arriba: np.ndarray, ancho: fl
         t = t - (t @ arriba) * arriba                       # plana
         largo = np.linalg.norm(t)
         t = t / largo if largo > 1e-9 else np.zeros(3)
+        ancho = aj[info[i]["tipo"]]["ancho"]
         if info[i]["clase"] == "inversa":
             f = max(ANCHO_TOTAL - ancho, 0.02)
         elif info[i]["tipo"] == "e":
@@ -168,22 +205,24 @@ def largo_de(p: np.ndarray, cerrada: bool) -> float:
 
 def generar(malla: Malla, controladores: list[dict], offset: float = 0.0, amplitud: float = 0.0,
             n: int | None = 500, paso: float | None = None, ancho: float = ANCHO,
-            inversas: dict | None = None) -> dict:
+            inversas: dict | None = None, lingual: dict | None = None) -> dict:
     """La curva de un movimiento, apoyada sobre su malla.
 
     controladores: [{id, tipo: 'v'|'l'|'e', pos: [x, y, z], manijas?: {a?, b?}, offset?: bool,
     festoneado?: bool}], en cualquier orden. inversas: {clave_inversa(a, b): [dx, dy, dz]}.
+    lingual: {offset, amplitud, ancho} propios del lado lingual (ver `ajustes`).
     Devuelve {cerrada, tramos: [{puntos, claves, info, manijas}], largo}. `claves` son las crestas
     y las crestas inversas sobre la malla, en el orden de la curva, y `manijas` sus dos manijas
     Bézier (sirven para dibujarlas y para agarrarlas).
     """
     orden = ordenar(controladores, malla.arriba)
     propias = {c["id"]: c["manijas"] for c in controladores if c.get("manijas")}
+    aj = ajustes(offset, amplitud, ancho, lingual)
     tramos, total = [], 0.0
     for tramo in orden["tramos"]:
-        claves, info = _claves(tramo, malla.arriba, offset, amplitud, orden["cerrada"], inversas)
+        claves, info = _claves(tramo, malla.arriba, aj, orden["cerrada"], inversas)
         claves = malla.mas_cercano(claves)
-        manijas = _manijas(claves, info, malla.arriba, float(ancho), propias, orden["cerrada"])
+        manijas = _manijas(claves, info, malla.arriba, aj, propias, orden["cerrada"])
         fina = malla.mas_cercano(_bezier(claves, manijas, orden["cerrada"]))
         puntos = malla.mas_cercano(remuestrear(fina, orden["cerrada"], n=n, paso=paso))
         for _ in range(2):      # apoyar sobre la malla desparejó un poco el paso: se vuelve a repartir

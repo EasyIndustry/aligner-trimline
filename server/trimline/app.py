@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import base64
 import os
+import re
 import subprocess
 import sys
 import threading
@@ -113,6 +114,40 @@ def mallas_de_carpeta(cuerpo: dict) -> dict:
     return {"carpeta": str(carpeta), "mallas": cargadas, "errores": errores}
 
 
+@app.post("/api/referencia")
+async def curva_de_referencia(request: Request, nombre: str) -> dict:
+    """Lee un .pts (cuerpo crudo) para mostrarlo encima del modelo: {curvas: [{maxilar, mov, puntos}]}.
+
+    Entiende el .pts con bloques ("sup 06" y sus puntos) y el de una sola curva, que toma el
+    maxilar y el movimiento del nombre del archivo (si no los dice, quedan en null).
+    """
+    texto = (await request.body()).decode("utf-8", errors="replace")
+    curvas, actual = [], None
+    datos = nombres.interpretar(nombre)
+    for linea in texto.splitlines():
+        partes = linea.replace(",", " ").split()
+        if not partes:
+            continue
+        try:
+            punto = [float(x) for x in partes[:3]]
+        except ValueError:
+            punto = None
+        if punto is None or len(partes) < 3:
+            cab = re.match(r"^(sup|inf)\D*(\d+)", linea.strip(), re.IGNORECASE)
+            actual = {"maxilar": cab[1].lower(), "mov": cab[2].zfill(2), "puntos": []} if cab else None
+            if actual:
+                curvas.append(actual)
+            continue
+        if actual is None:
+            actual = {"maxilar": datos["maxilar"], "mov": datos["movimiento"], "puntos": []}
+            curvas.append(actual)
+        actual["puntos"].extend(punto)
+    curvas = [c for c in curvas if len(c["puntos"]) >= 6]
+    if not curvas:
+        raise HTTPException(status_code=422, detail=f"{nombre}: no tiene puntos x y z")
+    return {"curvas": curvas}
+
+
 @app.post("/api/trabajo/guardar")
 def guardar_trabajo(cuerpo: dict) -> Response:
     """El trabajo como un archivo .trimline: sin las mallas, con la ruta de cada modelo."""
@@ -127,8 +162,59 @@ async def abrir_trabajo(request: Request) -> dict:
         trabajo, faltan = snapshot.abrir(await request.body())
     except (KeyError, ValueError) as e:
         raise HTTPException(status_code=422, detail=f"no se pudo abrir: {str(e).strip(chr(39))}") from None
+    return _abierto(trabajo, faltan)
+
+
+def _abierto(trabajo: dict, faltan: list[dict]) -> dict:
     return {"trabajo": trabajo, "faltan": faltan,
             "mallas": [mallas.obtener(a["malla"]).resumen() for a in trabajo.get("archivos", [])]}
+
+
+FILTRO_TRABAJO = ("Trabajo de línea de recorte (*.trimline)", "*.trimline")
+
+
+def _dialogo(fn, *args):
+    """Un diálogo nativo; sin diálogo en el sistema, 501 (la interfaz usa los del navegador)."""
+    try:
+        return fn(*args)
+    except (dialogos.SinDialogo, OSError) as e:
+        raise HTTPException(status_code=501, detail=str(e)) from None
+
+
+@app.post("/api/trabajo/guardar-en")
+def guardar_trabajo_en(cuerpo: dict) -> dict:
+    """Escribe el .trimline en el disco. Sin `ruta`, la pide con el diálogo del sistema.
+
+    Guardarlo desde acá deja saber su carpeta: ahí se buscan los modelos que se arrastraron.
+    """
+    ruta = cuerpo.get("ruta") or _dialogo(dialogos.guardar_archivo, cuerpo.get("inicial"),
+                                          cuerpo.get("nombre") or "trabajo.trimline", "Guardar el trabajo", FILTRO_TRABAJO)
+    if not ruta:
+        return {"ruta": None}
+    ruta = Path(ruta).expanduser()
+    datos, sin_ruta = snapshot.guardar(cuerpo.get("trabajo") or {}, ruta.parent)
+    try:
+        ruta.write_bytes(datos)
+    except OSError as e:
+        raise HTTPException(status_code=422, detail=f"no se pudo guardar en {ruta}: {e.strerror or e}") from None
+    return {"ruta": str(ruta), "sin_ruta": sin_ruta}
+
+
+@app.post("/api/trabajo/abrir-de")
+def abrir_trabajo_de(cuerpo: dict) -> dict:
+    """Abre un .trimline del disco (con el diálogo del sistema si no viene `ruta`).
+
+    Los modelos que no están en su ruta se buscan en la carpeta del .trimline.
+    """
+    ruta = cuerpo.get("ruta") or _dialogo(dialogos.abrir_archivo, cuerpo.get("inicial"), "Abrir un trabajo", FILTRO_TRABAJO)
+    if not ruta:
+        return {"ruta": None}
+    ruta = Path(ruta).expanduser()
+    try:
+        trabajo, faltan = snapshot.abrir(ruta.read_bytes(), ruta.parent)
+    except (KeyError, ValueError, OSError) as e:
+        raise HTTPException(status_code=422, detail=f"no se pudo abrir {ruta.name}: {str(e).strip(chr(39))}") from None
+    return {"ruta": str(ruta), **_abierto(trabajo, faltan)}
 
 
 @app.get("/api/exportadores")
@@ -161,7 +247,7 @@ def exportar_trabajo(cuerpo: dict) -> dict:
                 t = r["tramos"][0]
                 frente = mallas.obtener(m["malla"]).mas_cercano(curva.desde_el_frente(t["puntos"], t["claves"], t["info"]))
                 movs.append({
-                    "num": m["num"], "cerrada": True, "curva": frente,
+                    "num": m["num"], "cerrada": True, "curva": frente, "modelo": mallas.obtener(m["malla"]).nombre,
                     "controladores": [orden[i["id"]] for i in r["tramos"][0]["info"] if i["clase"] == "cresta"],
                     "tiene_clave": m["num"] in con_clave,
                 })

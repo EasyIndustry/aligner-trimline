@@ -35,9 +35,11 @@ const esInversa = (id) => !!id?.startsWith('i:');
 const curvas = { sup: {}, inf: {} };
 /** Lo que traía un trabajo abierto, para reconocer sus modelos cuando se arrastren. */
 let pendientes = /** @type {any[]} */ ([]);
+/** Curvas de referencia importadas de un .pts, por 'maxilar|mov': [x, y, z, ...]. Solo se miran. */
+let referencias = /** @type {Record<string, number[]>} */ ({});
 
 const visor = await crearVisor($('visor'));
-const hud = crearHud(visor.motor, { alMovimiento: irA, alDeslizar: deslizar });
+const hud = crearHud(visor.motor, { alMovimiento: irA, alDeslizar: deslizar, alBoton: (id) => { if (id === 'candado') candado(); } });
 
 // ---------- avisos ----------
 let borrarAviso = 0;
@@ -64,6 +66,8 @@ const paraServidor = (maxilar) => ({ ...estado.maxilares[maxilar], movimientos: 
 
 // ---------- carga de modelos ----------
 async function cargarArchivos(lista) {
+  const pts = [...lista].filter((a) => /\.pts$/i.test(a.name));
+  if (pts.length) await cargarReferencias(pts);
   const archivos = [...lista].filter((a) => /\.(stl|ply|obj)$/i.test(a.name));
   if (!archivos.length) return;
   let hechos = 0;
@@ -112,6 +116,45 @@ function finCarga() {
   alCambiarArchivos();
 }
 
+/** Lee .pts y los deja de referencia; uno sin maxilar ni movimiento en el nombre va al que se mira. */
+async function cargarReferencias(lista) {
+  for (const archivo of lista) {
+    try {
+      const { curvas: cs } = await api.referencia(archivo);
+      for (const c of cs) {
+        const maxilar = c.maxilar ?? estado.maxilar, mov = c.mov ?? estado.num;
+        if (!maxilar || !mov) throw new Error(`${archivo.name}: no dice de qué maxilar y movimiento es; abrí primero el modelo`);
+        referencias[`${maxilar}|${mov}`] = c.puntos;
+      }
+      avisar(`Referencia: ${archivo.name}`);
+    } catch (e) { avisar(String(e.message ?? e), true); }
+  }
+  pintarPanel(); mostrar();
+}
+
+/** Cuánto se separa la referencia de la curva: para cada punto de la referencia, la distancia a la curva. */
+function separacion(clave) {
+  const [maxilar, num] = clave.split('|');
+  const ref = referencias[clave], r = curvas[maxilar]?.[num];
+  if (!ref || !r) return null;
+  const nuestra = r.tramos.flatMap((t) => t.puntos);
+  if (nuestra.length < 6) return null;
+  // distancia a cada segmento de nuestra curva (densa: 300 puntos), punto por punto de la referencia
+  const ds = [];
+  for (let i = 0; i < ref.length; i += 3) {
+    let mejor = Infinity;
+    for (let j = 0; j + 5 < nuestra.length; j += 3) {
+      const ax = nuestra[j], ay = nuestra[j + 1], az = nuestra[j + 2];
+      const bx = nuestra[j + 3] - ax, by = nuestra[j + 4] - ay, bz = nuestra[j + 5] - az;
+      const px = ref[i] - ax, py = ref[i + 1] - ay, pz = ref[i + 2] - az;
+      const t = Math.min(1, Math.max(0, (px * bx + py * by + pz * bz) / (bx * bx + by * by + bz * bz || 1)));
+      mejor = Math.min(mejor, Math.hypot(px - t * bx, py - t * by, pz - t * bz));
+    }
+    ds.push(mejor);
+  }
+  return { media: ds.reduce((a, b) => a + b, 0) / ds.length, max: Math.max(...ds) };
+}
+
 /** Después de cargar o de tocar la tabla: qué maxilares hay y cuál se mira. */
 function alCambiarArchivos() {
   const hay = Object.keys(MAXILARES).filter((m) => movimientos(m).length);
@@ -149,6 +192,7 @@ function mostrar() {
   const mov = estado.maxilar ? movimientos(estado.maxilar).find((m) => m.num === estado.num) : null;
   visor.mostrar(mov?.malla ?? null);
   visor.dibujar(mov ? curvas[estado.maxilar][estado.num] ?? null : null, estado.seleccion, estado.elegidos);
+  visor.referencia(mov ? referencias[`${estado.maxilar}|${estado.num}`] ?? null : null);
   pintarHud();
 }
 
@@ -163,6 +207,7 @@ function resolverTodo({ soloActual = false } = {}) {
   const recibir = (r) => {
     if (mio !== turno && soloActual) return;                 // llegó tarde: ya hay algo más nuevo
     Object.assign(curvas[maxilar], r.movimientos);
+    if (Object.keys(referencias).length) pintarReferencias();
     if (maxilar === estado.maxilar && !arrastre) mostrar();
     else if (maxilar === estado.maxilar) visor.dibujar(curvas[maxilar][estado.num] ?? null, estado.seleccion, estado.elegidos);
   };
@@ -373,12 +418,26 @@ function deslizar(id, valor, final) {
   const max = actual();
   if (!max) return;
   antesDeDeslizar ??= foto();
-  max[id] = valor;
+  // 'l.<campo>': el del lado lingual (con el candado abierto); si no, el general / vestibular
+  if (id.startsWith('l.')) { if (max.lingual) max.lingual[id.slice(2)] = valor; } else max[id] = valor;
   if (final) { recordar(antesDeDeslizar); antesDeDeslizar = null; }
   pintarHud();
   const ahora = performance.now();
   if (final) resolverTodo();
   else if (ahora - ultimoPedido > 60) { ultimoPedido = ahora; resolverTodo({ soloActual: true }); }
+}
+
+/**
+ * El candado de los deslizadores: cerrado, offset, festoneado y ancho valen igual para vestibular
+ * y lingual; abierto, el lingual tiene los suyos (arrancan iguales). Al cerrarlo quedan los vestibulares.
+ */
+function candado() {
+  const max = actual();
+  if (!max) return;
+  recordar();
+  if (max.lingual) delete max.lingual;
+  else max.lingual = { offset: max.offset, amplitud: max.amplitud, ancho: max.ancho };
+  pintarHud(); resolverTodo();
 }
 
 /** Saca lo que se le hizo a mano a un punto intermedio: vuelve adonde lo pone la curva. */
@@ -432,7 +491,7 @@ function quitarClave() {
 
 window.addEventListener('keydown', (ev) => {
   const ctrl = ev.ctrlKey || ev.metaKey, tecla = ev.key.toLowerCase();
-  if (ctrl && tecla === 's') { ev.preventDefault(); $('guardar').click(); return; }
+  if (ctrl && tecla === 's') { ev.preventDefault(); guardar(ev.shiftKey); return; }
   if (/** @type {HTMLElement} */ (ev.target).matches('input, select, textarea')) return;
   if (ctrl && (tecla === 'z' || tecla === 'y')) {
     ev.preventDefault();
@@ -469,7 +528,14 @@ function pintarHud() {
       titulo: `${MAXILARES[estado.maxilar]} · movimiento ${estado.num}${estado.num === nums[0] ? ' (base)' : ''}`,
       nums, actual: estado.num, claves, clavesSel: new Set(sel ? Object.keys(sel.claves) : []),
     },
-    deslizadores: DESLIZADORES.map((d) => ({ ...d, valor: max[d.id] })),
+    deslizadores: max.lingual
+      ? [...DESLIZADORES.map((d) => ({ ...d, titulo: `${d.titulo} V`, valor: max[d.id], fila: 1 })),
+         ...DESLIZADORES.map((d) => ({ ...d, id: `l.${d.id}`, titulo: `${d.titulo} L`, valor: max.lingual[d.id] ?? max[d.id], fila: 0 }))]
+      : DESLIZADORES.map((d) => ({ ...d, valor: max[d.id] })),
+    botones: [{
+      id: 'candado', texto: max.lingual ? '🔓' : '🔒', activo: !max.lingual,
+      leyenda: max.lingual ? 'V ≠ L' : 'V = L',
+    }],
   });
 }
 
@@ -516,7 +582,18 @@ function pintarPanel() {
     caja.checked = elegidos.length > 0 && siguen === elegidos.length;
     caja.indeterminate = siguen > 0 && siguen < elegidos.length;
   }
+  pintarReferencias();
   pintarHud();
+}
+
+function pintarReferencias() {
+  $('referencias').replaceChildren(...Object.keys(referencias).sort().map((clave) => {
+    const li = document.createElement('li');
+    const [maxilar, mov] = clave.split('|'), sep = separacion(clave);
+    li.textContent = `${MAXILARES[maxilar] ?? maxilar} ${mov}: ${sep ? `separación media ${sep.media.toFixed(2)} mm, máxima ${sep.max.toFixed(2)} mm` : 'todavía sin curva para comparar'}`;
+    return li;
+  }));
+  /** @type {HTMLButtonElement} */ ($('quitar-referencias')).disabled = !Object.keys(referencias).length;
 }
 
 $('tabla').addEventListener('change', (ev) => {
@@ -546,16 +623,76 @@ for (const campo of ['offset', 'festoneado']) {
   });
 }
 
-// las secciones del panel se pliegan, y cada una se acuerda de cómo quedó
-for (const d of /** @type {NodeListOf<HTMLDetailsElement>} */ (document.querySelectorAll('#panel details'))) {
-  const clave = `trimline.seccion.${d.dataset.seccion}`;
-  try { const v = localStorage.getItem(clave); if (v !== null) d.open = v === '1'; } catch { /* sin almacenamiento */ }
-  d.addEventListener('toggle', () => { try { localStorage.setItem(clave, d.open ? '1' : '0'); } catch { /* idem */ } });
+// ---------- el panel: un paso por vez, con pestañas y anterior / siguiente ----------
+const guardado = (clave, valor) => {
+  try { if (valor === undefined) return localStorage.getItem(clave); localStorage.setItem(clave, valor); } catch { /* sin almacenamiento */ }
+  return null;
+};
+const pasos = /** @type {HTMLElement[]} */ ([...document.querySelectorAll('#pasos section')]);
+const pestanas = /** @type {HTMLButtonElement[]} */ ([...document.querySelectorAll('#pestanas button')]);
+function irAPaso(nombre) {
+  const i = Math.max(0, pasos.findIndex((p) => p.dataset.paso === nombre));
+  pasos.forEach((p, k) => { p.hidden = k !== i; });
+  pestanas.forEach((b) => b.setAttribute('aria-selected', String(b.dataset.paso === pasos[i].dataset.paso)));
+  pestanas.find((b) => b.dataset.paso === pasos[i].dataset.paso)?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+  /** @type {HTMLButtonElement} */ ($('anterior')).disabled = i === 0;
+  /** @type {HTMLButtonElement} */ ($('siguiente')).disabled = i === pasos.length - 1;
+  $('paso-actual').textContent = `${i + 1} de ${pasos.length} · ${pasos[i].dataset.titulo}`;
+  $('pasos').scrollTop = 0;
+  guardado('trimline.paso', pasos[i].dataset.paso);
 }
+const pasoActual = () => pasos.findIndex((p) => !p.hidden);
+for (const b of pestanas) b.addEventListener('click', () => irAPaso(b.dataset.paso));
+$('anterior').addEventListener('click', () => irAPaso(pasos[Math.max(0, pasoActual() - 1)].dataset.paso));
+$('siguiente').addEventListener('click', () => irAPaso(pasos[Math.min(pasos.length - 1, pasoActual() + 1)].dataset.paso));
+irAPaso(guardado('trimline.paso') ?? pasos[0].dataset.paso);
+
+// el ancho del panel se cambia arrastrando el borde, y se puede esconder del todo
+const ANCHO_PANEL = [320, 720];
+function anchoPanel(px) {
+  const w = Math.round(Math.min(ANCHO_PANEL[1], Math.max(ANCHO_PANEL[0], px)));
+  document.documentElement.style.setProperty('--panel', `${w}px`);
+  return w;
+}
+anchoPanel(Number(guardado('trimline.panel')) || 340);
+const borde = $('borde');
+borde.addEventListener('pointerdown', (ev) => {
+  borde.setPointerCapture(ev.pointerId);
+  borde.classList.add('arrastrando');
+});
+borde.addEventListener('pointermove', (ev) => {
+  if (borde.classList.contains('arrastrando')) anchoPanel(window.innerWidth - ev.clientX);
+});
+borde.addEventListener('pointerup', (ev) => {
+  borde.classList.remove('arrastrando');
+  guardado('trimline.panel', String(anchoPanel(window.innerWidth - ev.clientX)));
+});
+borde.addEventListener('dblclick', () => guardado('trimline.panel', String(anchoPanel(340))));
+function verPanel(ver) {
+  document.body.classList.toggle('sin-panel', !ver);
+  $('mostrar-panel').hidden = ver;
+  guardado('trimline.sin-panel', ver ? '0' : '1');
+}
+$('esconder-panel').addEventListener('click', () => verPanel(false));
+$('mostrar-panel').addEventListener('click', () => verPanel(true));
+verPanel(guardado('trimline.sin-panel') !== '1');
+
+// la transparencia del modelo, por si la curva queda detrás
+const opacidad = /** @type {HTMLInputElement} */ ($('opacidad-modelo'));
+function ponerOpacidad(v) {
+  opacidad.value = String(v);
+  $('opacidad-valor').textContent = `${Math.round(v * 100)}%`;
+  visor.opacidad(v);
+}
+opacidad.addEventListener('input', () => { ponerOpacidad(Number(opacidad.value)); guardado('trimline.opacidad', opacidad.value); });
+ponerOpacidad(Number(guardado('trimline.opacidad')) || 1);
 
 const soltarEn = $('soltar');
 $('elegir').addEventListener('click', () => $('archivos').click());
 $('elegir-modelos').addEventListener('click', cargarCarpeta);
+$('elegir-referencia').addEventListener('click', () => $('archivo-referencia').click());
+$('archivo-referencia').addEventListener('change', (ev) => { const el = /** @type {HTMLInputElement} */ (ev.target); cargarReferencias([...(el.files ?? [])]); el.value = ''; });
+$('quitar-referencias').addEventListener('click', () => { referencias = {}; pintarPanel(); mostrar(); });
 $('archivos').addEventListener('change', (ev) => { const el = /** @type {HTMLInputElement} */ (ev.target); cargarArchivos(el.files ?? []); el.value = ''; });
 for (const tipo of ['dragenter', 'dragover']) document.addEventListener(tipo, (ev) => { ev.preventDefault(); soltarEn.classList.add('encima'); });
 for (const tipo of ['dragleave', 'drop']) document.addEventListener(tipo, (ev) => { ev.preventDefault(); soltarEn.classList.remove('encima'); });
@@ -616,8 +753,48 @@ $('exportar').addEventListener('click', async () => {
   } catch (e) { avisar(e.message, true); }
 });
 
-// Guardar: una foto del trabajo en un .trimline. Las mallas no van: solo dónde está cada STL
-$('guardar').addEventListener('click', async () => {
+// Guardar: una foto del trabajo en un .trimline. Las mallas no van: solo dónde está cada STL.
+// Lo escribe el servidor (sabe la carpeta: ahí busca los STL que se arrastraron). Ya guardado
+// una vez, Guardar vuelve a escribir el mismo archivo (si sigue siendo el mismo caso);
+// "Guardar como…" pregunta dónde.
+let rutaTrabajo = /** @type {string | null} */ (null);
+let idTrabajo = '';
+const carpetaDe = (ruta) => ruta?.replace(/[\\/][^\\/]*$/, '') || null;
+
+function datosTrabajo() {
+  return {
+    id: idCaso(),
+    // los que no se encontraron al abrir también: así no se pierde dónde estaban
+    archivos: [...estado.archivos, ...pendientes].map(({ malla, nombre, maxilar, mov, usar, ruta }) => ({ malla, nombre, maxilar, mov, usar, ruta })),
+    maxilares: estado.maxilares,
+    vista: { maxilar: estado.maxilar, num: estado.num, modo: estado.modo },
+    exportar: { formato: /** @type {HTMLSelectElement} */ ($('formato')).value, n: Number(/** @type {HTMLInputElement} */ ($('puntos')).value) || 300, carpeta: campoCarpeta.value.trim() },
+  };
+}
+
+function avisarGuardado(nombre, sinRuta) {
+  avisar(sinRuta
+    ? `Guardado: ${nombre}. De ${sinRuta} modelos no se sabe la carpeta: al abrirlo se buscan junto al .trimline, o usá «elegí carpeta».`
+    : `Guardado: ${nombre}`);
+}
+
+async function guardar(como = false) {
+  try {
+    avisar('Guardando…');
+    const inicial = carpetaDe(rutaTrabajo) ?? carpetaDe(estado.archivos.find((a) => a.ruta)?.ruta) ?? (campoCarpeta.value.trim() || null);
+    const mismo = !como && rutaTrabajo && idTrabajo === idCaso();
+    const r = await api.guardarEn({ trabajo: datosTrabajo(), ruta: mismo ? rutaTrabajo : null, inicial, nombre: `${idCaso()}.trimline` });
+    if (!r.ruta) { avisar(''); return; }
+    rutaTrabajo = r.ruta; idTrabajo = idCaso();
+    avisarGuardado(r.ruta, r.sin_ruta.length);
+  } catch (e) {
+    if (e.status === 501) await guardarConElNavegador();
+    else avisar(`No se pudo guardar: ${e.message}`, true);
+  }
+}
+
+/** Sin diálogos en el sistema: el selector del navegador (o una descarga). */
+async function guardarConElNavegador() {
   let destino = null;
   if (elegirDonde) {
     try {
@@ -628,25 +805,17 @@ $('guardar').addEventListener('click', async () => {
     } catch (e) { if (e.name === 'AbortError') return; }
   }
   try {
-    avisar('Guardando…');
-    const { blob, sinRuta } = await api.guardarTrabajo({
-      id: idCaso(),
-      // los que no se encontraron al abrir también: así no se pierde dónde estaban
-      archivos: [...estado.archivos, ...pendientes].map(({ malla, nombre, maxilar, mov, usar, ruta }) => ({ malla, nombre, maxilar, mov, usar, ruta })),
-      maxilares: estado.maxilares,
-      vista: { maxilar: estado.maxilar, num: estado.num, modo: estado.modo },
-      exportar: { formato: /** @type {HTMLSelectElement} */ ($('formato')).value, n: Number(/** @type {HTMLInputElement} */ ($('puntos')).value) || 300, carpeta: campoCarpeta.value.trim() },
-    });
+    const { blob, sinRuta } = await api.guardarTrabajo(datosTrabajo());
     if (destino) {
       const w = await destino.createWritable();
       await w.write(blob); await w.close();
     } else bajar(`${idCaso()}.trimline`, blob);
-    const nombre = destino?.name ?? `${idCaso()}.trimline`;
-    avisar(sinRuta
-      ? `Guardado: ${nombre}. De ${sinRuta} modelos no se sabe la carpeta (se arrastraron): al abrirlo habrá que cargarlos de nuevo. Con «elegí carpeta» queda anotada.`
-      : `Guardado: ${nombre}`);
+    avisarGuardado(destino?.name ?? `${idCaso()}.trimline`, sinRuta);
   } catch (e) { avisar(`No se pudo guardar: ${e.message}`, true); }
-});
+}
+
+$('guardar').addEventListener('click', () => guardar());
+$('guardar-como').addEventListener('click', () => guardar(true));
 
 /** Un trabajo viejo (.trimline.json): trae los puntos, pero las mallas hay que arrastrarlas. */
 function abrirJson(t) {
@@ -667,7 +836,11 @@ function abrirJson(t) {
 /** Un .trimline: queda todo como estaba al guardarlo. Los modelos se leen de donde estaban. */
 async function abrirTrabajo(archivo) {
   avisar('Abriendo…');
-  const { trabajo: t, mallas, faltan } = await api.abrirTrabajo(archivo);
+  await aplicarTrabajo(await api.abrirTrabajo(archivo), archivo.name);
+  rutaTrabajo = null;
+}
+
+async function aplicarTrabajo({ trabajo: t, mallas, faltan }, nombre) {
   const arriba = Object.fromEntries(mallas.map((m) => [m.id, m.arriba]));
   let hechas = 0;
   for (const id of Object.keys(arriba)) {
@@ -695,10 +868,22 @@ async function abrirTrabajo(archivo) {
   if (pendientes.length) {
     const donde = [...new Set(pendientes.map((p) => p.ruta?.replace(/[\\/][^\\/]*$/, '')).filter(Boolean))];
     avisar(`Trabajo abierto, pero faltan ${pendientes.length} modelos${donde.length ? ` (no están en ${donde.join(', ')})` : ''}: arrastralos o usá «elegí carpeta».`, true);
-  } else avisar(`Trabajo abierto: ${archivo.name}`);
+  } else avisar(`Trabajo abierto: ${nombre}`);
 }
 
-$('abrir').addEventListener('click', () => $('trabajo').click());
+$('abrir').addEventListener('click', async () => {
+  try {
+    const r = await api.abrirDe({ inicial: carpetaDe(rutaTrabajo) ?? carpetaDe(estado.archivos.find((a) => a.ruta)?.ruta) });
+    if (!r.ruta) return;
+    avisar('Abriendo…');
+    await aplicarTrabajo(r, r.ruta);
+    rutaTrabajo = r.ruta; idTrabajo = idCaso();
+    olvidarHistorial();
+  } catch (e) {
+    if (e.status === 501) $('trabajo').click();                 // sin diálogos: el del navegador
+    else avisar(`No se pudo abrir: ${e.message}`, true);
+  }
+});
 $('trabajo').addEventListener('change', async (ev) => {
   const el = /** @type {HTMLInputElement} */ (ev.target);
   const archivo = el.files?.[0];

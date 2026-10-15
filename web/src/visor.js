@@ -11,7 +11,7 @@ THREE.BufferGeometry.prototype.computeBoundsTree = computeBoundsTree;
 THREE.BufferGeometry.prototype.disposeBoundsTree = disposeBoundsTree;
 THREE.Mesh.prototype.raycast = acceleratedRaycast;
 
-export const COLORES = { v: 0x1f6fd0, l: 0xd9741a, e: 0x1e9a4a, inversa: 0x666666, seleccion: 0xffd400, curva: 0xff3b4e, manija: 0x7df9ff };
+export const COLORES = { v: 0x1f6fd0, l: 0xd9741a, e: 0x1e9a4a, inversa: 0x666666, seleccion: 0xffd400, curva: 0xff3b4e, manija: 0x7df9ff, referencia: 0x2fe39a };
 const RADIO_PX = 6;
 
 /** El matcap del modelo: un yeso gris claro, con el brillo arriba a la izquierda y bordes más oscuros. */
@@ -104,6 +104,9 @@ export async function crearVisor(contenedor) {
   const puntos = new THREE.Group();
   raiz.add(puntos);
   const matCurva = new LineMaterial({ color: COLORES.curva, linewidth: 2.5 });
+  // la misma curva sin prueba de profundidad, punteada y tenue: se ve aunque el modelo la tape
+  const matOculta = new LineMaterial({ color: COLORES.curva, linewidth: 1.6, depthTest: false, depthWrite: false,
+    transparent: true, opacity: 0.55, dashed: true, dashSize: 0.8, gapSize: 0.6 });
   const matManija = new LineMaterial({ color: COLORES.manija, linewidth: 1.5, depthTest: false });
   const cubo = new THREE.BoxGeometry(1.6, 1.6, 1.6);
   let lineas = /** @type {Line2[]} */ ([]);
@@ -130,7 +133,7 @@ export async function crearVisor(contenedor) {
     puntos.clear();
     porId.clear();
     manijas = [];
-    for (const l of lineas) { raiz.remove(l); l.geometry.dispose(); }
+    for (const l of new Set(lineas)) { raiz.remove(l); l.geometry.dispose(); }
     lineas = [];
     if (!r) return;
     for (const c of r.controladores) {
@@ -163,11 +166,18 @@ export async function crearVisor(contenedor) {
       const pts = t.puntos.slice();
       if (r.cerrada) pts.push(pts[0], pts[1], pts[2]);
       if (pts.length < 6) continue;
-      const linea = new Line2(new LineGeometry().setPositions(pts), matCurva);
-      linea.userData = { noEdge: true, noAO: true };
-      linea.frustumCulled = false;
-      raiz.add(linea);
-      lineas.push(linea);
+      const geo = new LineGeometry().setPositions(pts);
+      const oculta = new Line2(geo, matOculta);
+      oculta.computeLineDistances();
+      oculta.renderOrder = 10;                          // encima de todo, debajo de la que se ve
+      const linea = new Line2(geo, matCurva);
+      linea.renderOrder = 11;
+      for (const l of [oculta, linea]) {
+        l.userData = { noEdge: true, noAO: true };
+        l.frustumCulled = false;
+        raiz.add(l);
+        lineas.push(l);
+      }
     }
   }
 
@@ -274,11 +284,45 @@ export async function crearVisor(contenedor) {
     manijas.find((h) => h.lado === lado)?.malla.position.set(pos[0], pos[1], pos[2]);
   }
 
+  // ---------- curva de referencia (un .pts importado, solo para mirar) ----------
+  const matRef = new LineMaterial({ color: COLORES.referencia, linewidth: 2 });
+  const matRefOculta = new LineMaterial({ color: COLORES.referencia, linewidth: 1.3, depthTest: false, depthWrite: false,
+    transparent: true, opacity: 0.5, dashed: true, dashSize: 0.8, gapSize: 0.6 });
+  let refLineas = /** @type {Line2[]} */ ([]);
+  /** Dibuja la curva de referencia ([x, y, z, ...] en coordenadas del archivo) o la saca (null). */
+  function referencia(pts) {
+    for (const l of refLineas) raiz.remove(l);
+    refLineas[0]?.geometry.dispose();
+    refLineas = [];
+    if (!pts || pts.length < 6) return;
+    const geo = new LineGeometry().setPositions([...pts, pts[0], pts[1], pts[2]]);   // cerrada
+    const oculta = new Line2(geo, matRefOculta);
+    oculta.computeLineDistances();
+    oculta.renderOrder = 8;
+    const linea = new Line2(geo, matRef);
+    linea.renderOrder = 9;
+    for (const l of [oculta, linea]) {
+      l.userData = { noEdge: true, noAO: true };
+      l.frustumCulled = false;
+      raiz.add(l);
+      refLineas.push(l);
+    }
+  }
+
+  /** La opacidad del modelo (1 = sólido). Transparente, la curva y los puntos de atrás se ven. */
+  function opacidad(v) {
+    const transparente = v < 0.999;
+    material.transparent = transparente;
+    material.opacity = v;
+    material.depthWrite = !transparente;      // si escribe profundidad, lo de atrás igual no se ve
+    material.needsUpdate = true;
+  }
+
   /** Dónde cae en el visor un punto dado en coordenadas del archivo: [x, y] en píxeles. */
   function aPantalla(pos) {
     const p = raiz.localToWorld(new THREE.Vector3(pos[0], pos[1], pos[2]));
     return motor.view.project([p.x, p.y, p.z]);
   }
 
-  return { aPantalla, resaltar, posicion, controladoresEn, manijaEn, enPlano, moverManija, motor, lienzo, registrar, tiene: (id) => geometrias.has(id), orientar, mostrar, encuadrar, dibujar, moverPunto, picar, controladorEn };
+  return { referencia, opacidad, aPantalla, resaltar, posicion, controladoresEn, manijaEn, enPlano, moverManija, motor, lienzo, registrar, tiene: (id) => geometrias.has(id), orientar, mostrar, encuadrar, dibujar, moverPunto, picar, controladorEn };
 }

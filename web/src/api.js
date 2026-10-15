@@ -16,6 +16,11 @@ export const subirMalla = (archivo) => fetch(`/api/mallas?nombre=${encodeURIComp
   method: 'POST', headers: { 'Content-Type': 'application/octet-stream' }, body: archivo,
 }).then(json);
 
+/** Lee un .pts para mostrarlo de referencia: { curvas: [{ maxilar, mov, puntos: [x, y, z, ...] }] }. */
+export const referencia = (archivo) => fetch(`/api/referencia?nombre=${encodeURIComponent(archivo.name)}`, {
+  method: 'POST', headers: { 'Content-Type': 'text/plain' }, body: archivo,
+}).then(json);
+
 /** La malla ya soldada, con la misma numeración que usa el servidor: { posiciones, indices }. */
 export async function bajarMalla(id) {
   const r = await fetch(`/api/mallas/${id}/bin`);
@@ -55,6 +60,11 @@ export async function guardarTrabajo(trabajo) {
   if (!r.ok) await json(r);
   return { blob: await r.blob(), sinRuta: Number(r.headers.get('X-Sin-Ruta')) || 0 };
 }
+
+/** El servidor escribe el .trimline (sin `ruta`, pregunta dónde): { ruta, sin_ruta } o { ruta: null }. 501 = sin diálogos. */
+export const guardarEn = (cuerpo) => enviar('/api/trabajo/guardar-en', cuerpo);
+/** El servidor abre un .trimline del disco (con su diálogo): { ruta, trabajo, mallas, faltan } o { ruta: null }. */
+export const abrirDe = (cuerpo) => enviar('/api/trabajo/abrir-de', cuerpo);
 
 /** Abre un .trimline: el servidor carga los modelos que encuentra. Devuelve { trabajo, mallas: [resumen], faltan }. */
 export const abrirTrabajo = (archivo) => fetch('/api/trabajo/abrir', {

@@ -17,15 +17,17 @@ En Linux, desde una copia del repo:
 Arma el entorno la primera vez, levanta el servidor local y abre el navegador. En Windows se
 instala con `AlignerTrimlineSetup-<versión>.exe`, que sale de cada release.
 
-1. **Modelos.** Arrastrá los STL o usá "elegí carpeta" (así el trabajo guardado sabe dónde
-   están y los vuelve a leer solo). El nombre dice el maxilar y el movimiento
-   (`0044 Apellido Nombre 1.0 sup 01.stl`); lo que no se reconoce se corrige en la tabla.
-   Destildá los movimientos que no se usan: el primero tildado de cada maxilar es la base.
+1. **Modelos.** Arrastrá los STL o usá "elegí carpeta". El nombre dice el maxilar y el
+   movimiento: `0044 Apellido Nombre 1.0 sup 01.stl` o `BZ254-L22-A-solido.stl` (id, U/L de
+   superior/inferior pegado al movimiento, tipo y después texto libre); lo que no se reconoce se
+   corrige en la tabla. Destildá los movimientos que no se usan: el primero tildado de cada
+   maxilar es la base.
 2. **Maxilar.** Se trabaja de a uno.
 3. **Puntos.** En el movimiento base: modo vestibular y un clic en la encía debajo de cada
    diente; modo lingual y lo mismo del otro lado; modo extremos y un clic en cada punta.
 4. **Ajuste.** Los deslizadores del visor mueven el offset, el festoneado y el ancho de los
-   festones. Con un punto elegido aparecen sus dos manijas: arrastrarlas ajusta ese festón.
+   festones. Con el candado cerrado valen igual para los dos lados; abierto, aparece una fila
+   para vestibular (V) y otra para lingual (L). Con un punto elegido aparecen sus dos manijas: arrastrarlas ajusta ese festón.
 5. **Movimientos.** Arrastrá el cursor de la línea de tiempo. Si en un movimiento la curva
    quedó corrida, mové el punto: queda un keyframe ahí y la curva avanza de a poco entre
    keyframes.
@@ -35,9 +37,10 @@ instala con `AlignerTrimlineSetup-<versión>.exe`, que sale de cada release.
    sistema; si ya hay archivos con ese nombre, pregunta antes de reemplazarlos).
 7. **Guardar.** `<ID>.trimline` es una foto del trabajo: puntos, keyframes, ajustes y la vista.
    Las mallas no van adentro (sería mucho volumen guardando seguido): va la ruta de cada STL,
-   y al abrirlo se leen de ahí. Si no se encuentran (o se habían arrastrado, que no deja
-   saber la ruta), avisa cuáles faltan para arrastrarlos o elegir su carpeta. Los `.trimline`
-   de antes (con las mallas adentro) y los `.trimline.json` también se abren.
+   y al abrirlo se leen de ahí o, si no están, de la carpeta del `.trimline`. Guardar y Abrir
+   usan el diálogo del sistema; ya guardado, Guardar reescribe el mismo archivo y "Guardar
+   como…" (Ctrl+Shift+S) pregunta dónde. Si falta algún modelo, avisa cuál para arrastrarlo o
+   elegir su carpeta. Los `.trimline` de antes (con las mallas adentro) también se abren.
 
 Ctrl+Z deshace y Ctrl+Y (o Ctrl+Shift+Z) rehace; Ctrl+S guarda.
 

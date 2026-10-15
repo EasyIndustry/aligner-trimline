@@ -136,3 +136,38 @@ def test_exportar_a_una_carpeta(domo_stl, tmp_path):
     assert cliente.post("/api/exportar", json={**pedido, "pisar": True}).status_code == 200
     assert (tmp_path / "BN595.pts").read_text() != "viejo"
     assert cliente.post("/api/exportar", json={**pedido, "carpeta": str(tmp_path / "no-existe")}).status_code == 422
+
+
+def test_modelos_arrastrados_se_encuentran_junto_al_trimline(domo_stl, tmp_path):
+    from trimline import mallas
+    nombre = "0046 Caso Prueba 1.0 sup 03.stl"
+    m = cliente.post("/api/mallas", params={"nombre": nombre}, content=domo_stl).json()
+    mallas.obtener(m["id"]).ruta = None               # arrastrado: el navegador no da la ruta
+    (tmp_path / nombre).write_bytes(domo_stl)          # pero el STL está en la carpeta del trabajo
+    trabajo = {"id": "0046", "archivos": [{"malla": m["id"], "nombre": nombre, "maxilar": "sup", "mov": "03", "usar": True}],
+               "maxilares": {"sup": {"controladores": anillo(num="03")}}}
+    destino = tmp_path / "0046.trimline"
+    r = cliente.post("/api/trabajo/guardar-en", json={"trabajo": trabajo, "ruta": str(destino)}).json()
+    assert r["ruta"] == str(destino) and r["sin_ruta"] == []
+    import json
+    assert json.loads(destino.read_text())["archivos"][0]["ruta"] == str((tmp_path / nombre).resolve())
+
+    # un .trimline sin rutas (guardado desde el navegador) también encuentra los STL de su carpeta
+    sin = json.loads(destino.read_text())
+    del sin["archivos"][0]["ruta"]
+    destino.write_text(json.dumps(sin))
+    mallas.descartar(m["id"])
+    a = cliente.post("/api/trabajo/abrir-de", json={"ruta": str(destino)}).json()
+    assert a["faltan"] == [] and a["mallas"][0]["id"] == m["id"] and a["mallas"][0]["ruta"].endswith(nombre)
+
+
+def test_curva_de_referencia():
+    suelta = "0 20.9 -9.5\r\n0.83 20.88 -9.62\r\n1.6 20.85 -9.3\r\n"
+    r = cliente.post("/api/referencia", params={"nombre": "BY179_inf_00.pts"}, content=suelta).json()
+    assert r["curvas"] == [{"maxilar": "inf", "mov": "00", "puntos": [0, 20.9, -9.5, 0.83, 20.88, -9.62, 1.6, 20.85, -9.3]}]
+    bloques = "inf 00\r\n1 2 3\r\n4 5 6\r\nsup 07\r\n7 8 9\r\n1 1 1\r\n"
+    r = cliente.post("/api/referencia", params={"nombre": "X.pts"}, content=bloques).json()
+    assert [(c["maxilar"], c["mov"], len(c["puntos"])) for c in r["curvas"]] == [("inf", "00", 6), ("sup", "07", 6)]
+    r = cliente.post("/api/referencia", params={"nombre": "cualquiera.pts"}, content=suelta).json()
+    assert r["curvas"][0]["maxilar"] is None                 # sin nombre que lo diga: el que se mira
+    assert cliente.post("/api/referencia", params={"nombre": "x.pts"}, content="hola").status_code == 422

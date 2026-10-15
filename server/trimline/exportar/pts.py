@@ -13,9 +13,12 @@ Copia el de los casos que ya se cortan (`BN595.pts`, `BN595 PC.pts` y los datos 
 - `<ID>.curva`: JSON {"referencia", "id", "nombre", "etapa"} en Latin-1, sacado del nombre de los STL
   (`BN595 Apellido Nombre 2.0 BIS Sup 00 CNC3.stl` → CNC3, BN595, "Apellido Nombre 2.0", BIS).
 
-pts-por-curva es lo mismo con una curva por archivo: `<ID>_<maxilar>_<mov>.pts`.
+pts-por-curva es lo mismo con una curva por archivo, con el nombre del modelo de ese movimiento
+(`BZ254-L22-A-solido.stl` → `BZ254-L22-A-solido.pts`); sin modelo, `<ID>_<maxilar>_<mov>.pts`.
 """
 from __future__ import annotations
+
+import re
 
 import json
 
@@ -88,7 +91,7 @@ def un_archivo(trabajo: dict, o: dict) -> list[dict]:
 @exportador("pts-por-curva", "PTS (un archivo por maxilar y movimiento)", OPCIONES)
 def por_curva(trabajo: dict, o: dict) -> list[dict]:
     archivos = [
-        {"nombre": f"{trabajo['id']}_{maxilar}_{m['num']}.pts",
+        {"nombre": (re.sub(r"\.[A-Za-z0-9]+$", "", m["modelo"]) if m.get("modelo") else f"{trabajo['id']}_{maxilar}_{m['num']}") + ".pts",
          "texto": _bloque(None, m["curva"], o["decimales"], o["salto"])}
         for maxilar, movs in _maxilares(trabajo) for m in movs if len(m["curva"])
     ]

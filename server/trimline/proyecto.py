@@ -5,6 +5,8 @@ Un maxilar es:
     {
       "movimientos": [{"num": "00", "malla": "<id>"}, ...],   # los elegidos, en orden
       "offset": 0.0, "amplitud": 0.0, "ancho": 0.4,           # valen para todo el tratamiento
+      "lingual": {"offset": 0.0, "amplitud": 0.0, "ancho": 0.4},  # opcional: el lado lingual distinto
+                                                              # (entonces los de arriba son los vestibulares)
       "controladores": [
         {"id": "c1", "tipo": "v", "claves": {"00": [x, y, z], "08": [x, y, z]},
          "manijas": {"a": [dx, dy, dz], "b": [dx, dy, dz]},    # opcional: su festón puesto a mano
@@ -60,7 +62,8 @@ def resolver(maxilar: dict, num: str, n: int | None = 500, paso: float | None = 
         for c, p in zip(ctrl, sobre):
             c["pos"] = p
     res = curva.generar(malla, ctrl, float(maxilar.get("offset", 0.0)), float(maxilar.get("amplitud", 0.0)), n=n, paso=paso,
-                        ancho=float(maxilar.get("ancho", curva.ANCHO)), inversas=maxilar.get("inversas"))
+                        ancho=float(maxilar.get("ancho", curva.ANCHO)), inversas=maxilar.get("inversas"),
+                        lingual=maxilar.get("lingual"))
     res["controladores"] = ctrl
     res["num"] = num
     return res

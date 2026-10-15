@@ -21,83 +21,117 @@
     <div id="visor"></div>
     <div id="estado"></div>
     <div id="caja" hidden></div>
+    <label id="opacidad" title="Transparencia del modelo, para ver la curva si queda detrás">
+      <span>Modelo</span>
+      <input id="opacidad-modelo" type="range" min="0.15" max="1" step="0.05" value="1" />
+      <output id="opacidad-valor">100%</output>
+    </label>
+    <button id="mostrar-panel" type="button" title="Mostrar el panel" hidden>‹</button>
   </main>
+  <div id="borde" title="Arrastrá para cambiar el ancho del panel"></div>
   <aside id="panel">
-    <h1>Línea de recorte</h1>
-
-    <details data-seccion="1. Modelos" open>
-      <summary>1. Modelos</summary>
-      <div id="soltar">Arrastrá los STL acá, <button id="elegir" type="button">elegí archivos</button> o <button id="elegir-modelos" type="button" title="Cargados desde su carpeta, el .trimline anota dónde están y al abrirlo se leen solos">elegí carpeta</button></div>
-      <input id="archivos" type="file" accept=".stl,.ply,.obj" multiple hidden />
-      <label class="fila">ID del caso <input id="caso" type="text" placeholder="0044" /></label>
-      <table id="tabla">
-        <thead><tr><th title="Usar este movimiento">Usar</th><th>Archivo</th><th>Maxilar</th><th>Mov.</th></tr></thead>
-        <tbody></tbody>
-      </table>
-      <p class="nota" id="nota-carga">Destildá los movimientos que no se usan. El primero tildado de cada maxilar es la base.</p>
-    </details>
-
-    <details data-seccion="2. Maxilar" open>
-      <summary>2. Maxilar</summary>
-      <div id="maxilares" class="botones"></div>
-    </details>
-
-    <details data-seccion="3. Puntos" open>
-      <summary>3. Puntos</summary>
-      <div id="modos" class="botones">
-        <button data-modo="v" type="button" title="Tecla 1">Vestibular</button>
-        <button data-modo="l" type="button" title="Tecla 2">Lingual</button>
-        <button data-modo="e" type="button" title="Tecla 3">Extremos</button>
+    <header>
+      <div class="titulo">
+        <h1>Línea de recorte</h1>
+        <button id="esconder-panel" class="chico" type="button" title="Esconder el panel">›</button>
       </div>
-      <p class="nota" id="cuenta"></p>
-      <div class="fila" id="sigue">
-        <span>Los elegidos siguen</span>
-        <label><input id="usa-offset" type="checkbox" /> Offset</label>
-        <label><input id="usa-festoneado" type="checkbox" /> Festoneado</label>
-      </div>
-      <p class="nota">Shift + clic suma o saca un punto de la selección; shift + arrastrar en un lugar vacío elige todos los del rectángulo. Sin offset o sin festoneado, el diente no se mueve con ese deslizador y la curva va recta.</p>
-      <div class="botones">
-        <button id="borrar-punto" type="button" title="Supr">Borrar punto</button>
-        <button id="borrar-clave" type="button" title="Tecla K">Quitar keyframe</button>
-        <button id="restablecer" type="button" title="Vuelve a las tangentes calculadas">Restablecer festón</button>
-      </div>
-    </details>
+      <nav id="pestanas" role="tablist">
+        <button type="button" role="tab" data-paso="trabajo">Trabajo</button>
+        <button type="button" role="tab" data-paso="modelos">Modelos</button>
+        <button type="button" role="tab" data-paso="puntos">Puntos</button>
+        <button type="button" role="tab" data-paso="exportar">Exportar</button>
+        <button type="button" role="tab" data-paso="programa">Ayuda</button>
+      </nav>
+    </header>
 
-    <details data-seccion="4. Exportar" open>
-      <summary>4. Exportar</summary>
-      <label class="fila">Formato <select id="formato"></select></label>
-      <label class="fila">Puntos por curva <input id="puntos" type="number" min="10" max="5000" step="10" value="300" /></label>
-      <label class="fila">Carpeta <input id="carpeta" type="text" placeholder="elegí dónde exportar" spellcheck="false" /></label>
-      <div class="botones">
-        <button id="elegir-carpeta" type="button">Elegir carpeta…</button>
-        <button id="exportar" type="button" title="Los .pts para la máquina, en la carpeta elegida">Exportar</button>
-      </div>
-    </details>
+    <div id="pasos">
+      <section data-paso="trabajo" data-titulo="Trabajo">
+        <div class="botones cols-2">
+          <button id="guardar" class="principal" type="button" title="Ctrl+S. El trabajo en un archivo .trimline (los modelos no van adentro: solo dónde están). Ya guardado, vuelve a escribir el mismo archivo">Guardar</button>
+          <button id="guardar-como" type="button" title="Ctrl+Shift+S. Guardar en otro archivo">Guardar como…</button>
+          <button id="abrir" type="button">Abrir…</button>
+          <button id="salir" type="button" title="Apaga el servidor local">Salir</button>
+        </div>
+        <input id="trabajo" type="file" accept=".trimline,.json" hidden />
+        <p class="nota">El .trimline guarda los puntos, los ajustes y dónde está cada modelo (no los modelos).</p>
+      </section>
 
-    <details data-seccion="Trabajo" open>
-      <summary>Trabajo</summary>
-      <div class="botones">
-        <button id="guardar" type="button" title="Ctrl+S. El trabajo en un archivo .trimline (los modelos no van adentro: solo dónde están)">Guardar</button>
-        <button id="abrir" type="button">Abrir</button>
-        <button id="salir" type="button" title="Apaga el servidor local">Salir</button>
-      </div>
-      <input id="trabajo" type="file" accept=".trimline,.json" hidden />
-    </details>
+      <section data-paso="modelos" data-titulo="Modelos">
+        <div id="soltar">Arrastrá los STL acá
+          <div class="botones cols-2">
+            <button id="elegir" type="button">Elegir archivos…</button>
+            <button id="elegir-modelos" type="button" title="Cargados desde su carpeta, el .trimline anota dónde están y al abrirlo se leen solos">Elegir carpeta…</button>
+          </div>
+        </div>
+        <input id="archivos" type="file" accept=".stl,.ply,.obj" multiple hidden />
+        <label class="fila">ID del caso <input id="caso" type="text" placeholder="0044" /></label>
+        <table id="tabla">
+          <thead><tr><th title="Usar este movimiento">Usar</th><th>Archivo</th><th>Maxilar</th><th>Mov.</th></tr></thead>
+          <tbody></tbody>
+        </table>
+        <p class="nota" id="nota-carga">Destildá los movimientos que no se usan. El primero tildado de cada maxilar es la base.</p>
+        <h2>Curvas de referencia</h2>
+        <p class="nota">Un .pts hecho antes (o por otro programa) se dibuja en verde encima del modelo, solo para comparar. También se puede arrastrar.</p>
+        <div class="botones cols-2">
+          <button id="elegir-referencia" type="button">Cargar .pts…</button>
+          <button id="quitar-referencias" type="button" disabled>Quitarlas</button>
+        </div>
+        <input id="archivo-referencia" type="file" accept=".pts,.txt" multiple hidden />
+        <ul id="referencias" class="nota"></ul>
+      </section>
 
-    <details data-seccion="Actualizaciones" open>
-      <summary>Actualizaciones</summary>
-      <p class="nota" id="version"></p>
-      <div class="botones">
-        <button id="buscar-version" type="button">Buscar versiones nuevas</button>
-        <button id="volver-version" type="button" hidden>Volver a la anterior</button>
-      </div>
-      <div id="versiones"></div>
-    </details>
+      <section data-paso="puntos" data-titulo="Maxilar y puntos">
+        <h2>Maxilar</h2>
+        <div id="maxilares" class="botones cols-2"></div>
+        <h2>Marcar</h2>
+        <div id="modos" class="botones cols-3">
+          <button data-modo="v" type="button" title="Tecla 1">Vestibular</button>
+          <button data-modo="l" type="button" title="Tecla 2">Lingual</button>
+          <button data-modo="e" type="button" title="Tecla 3">Extremos</button>
+        </div>
+        <p class="nota" id="cuenta"></p>
+        <h2>Puntos elegidos</h2>
+        <div class="fila" id="sigue">
+          <span>Siguen al</span>
+          <label><input id="usa-offset" type="checkbox" /> Offset</label>
+          <label><input id="usa-festoneado" type="checkbox" /> Festoneado</label>
+        </div>
+        <div class="botones cols-3">
+          <button id="borrar-punto" type="button" title="Supr">Borrar punto</button>
+          <button id="borrar-clave" type="button" title="Tecla K">Quitar keyframe</button>
+          <button id="restablecer" type="button" title="Vuelve a las tangentes calculadas">Restablecer festón</button>
+        </div>
+        <p class="nota">Shift + clic suma o saca un punto de la selección; shift + arrastrar en un lugar vacío elige todos los del rectángulo. Sin offset o sin festoneado, el diente no se mueve con ese deslizador y la curva va recta.</p>
+      </section>
 
-    <details class="ayuda" data-seccion="Mouse" open>
-      <summary>Mouse</summary>
-      <p>Clic izquierdo: marcar (con un modo prendido) y mover puntos, también los intermedios; con un punto elegido, arrastrar sus manijas ajusta ese festón.<br />Shift + arrastrar con el izquierdo: elegir varios puntos.<br />Clic derecho: orbitar.<br />Shift + clic derecho: desplazar.<br />Rueda: zoom.<br />← →: cambiar de movimiento.<br />1, 2, 3: prender o apagar un modo; Esc: apagarlo.</p>
-    </details>
+      <section data-paso="exportar" data-titulo="Exportar">
+        <label class="fila">Formato <select id="formato"></select></label>
+        <label class="fila">Puntos por curva <input id="puntos" type="number" min="10" max="5000" step="10" value="300" /></label>
+        <label class="fila">Carpeta <input id="carpeta" type="text" placeholder="elegí dónde exportar" spellcheck="false" /></label>
+        <div class="botones cols-2">
+          <button id="elegir-carpeta" type="button">Elegir carpeta…</button>
+          <button id="exportar" class="principal" type="button" title="Los .pts para la máquina, en la carpeta elegida">Exportar</button>
+        </div>
+      </section>
+
+      <section data-paso="programa" data-titulo="Ayuda y versiones">
+        <h2>Actualizaciones</h2>
+        <p class="nota" id="version"></p>
+        <div class="botones cols-2">
+          <button id="buscar-version" type="button">Buscar versiones nuevas</button>
+          <button id="volver-version" type="button" hidden>Volver a la anterior</button>
+        </div>
+        <div id="versiones"></div>
+        <h2>Mouse y teclado</h2>
+        <p class="ayuda">Clic izquierdo: marcar (con un modo prendido) y mover puntos, también los intermedios; con un punto elegido, arrastrar sus manijas ajusta ese festón.<br />Shift + arrastrar con el izquierdo: elegir varios puntos.<br />Clic derecho: orbitar.<br />Shift + clic derecho: desplazar.<br />Rueda: zoom.<br />← →: cambiar de movimiento.<br />1, 2, 3: prender o apagar un modo; Esc: apagarlo.<br />Ctrl+Z / Ctrl+Y: deshacer y rehacer. Ctrl+S: guardar.</p>
+      </section>
+    </div>
+
+    <footer id="navegar">
+      <button id="anterior" type="button">← Anterior</button>
+      <span id="paso-actual"></span>
+      <button id="siguiente" type="button">Siguiente →</button>
+    </footer>
   </aside>
   <script type="module" src="./src/main.js"></script>
 </body>
