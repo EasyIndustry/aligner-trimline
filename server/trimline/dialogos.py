@@ -15,9 +15,11 @@ import sys
 # IFileOpenDialog (con FOS_PICKFOLDERS para carpetas) o IFileSaveDialog. No hay forma de pedirlos
 # desde .NET puro, así que va la interfaz COM declarada en C#.
 #
-# El servidor corre en segundo plano y Windows no deja que un proceso así se ponga adelante: el
-# diálogo quedaría detrás del navegador. Se cuelga de una ventanita invisible "siempre encima" a la
-# que se le da el foco enganchándose a la entrada del navegador (AttachThreadInput).
+# El servidor corre en segundo plano y Windows no deja que un proceso así tome el foco: el diálogo
+# quedaría detrás del navegador. Se cuelga de una ventanita invisible "siempre encima": lo que
+# cuelga de una ventana así también queda encima de todo, y se ve. NO se toca la entrada de otros
+# procesos (AttachThreadInput): si el diálogo se colgaba enganchado a la barra de tareas, la PC
+# quedaba sin poder abrir el menú Inicio ni hacer clic.
 # Los datos llegan por variables de entorno (sin problemas de comillas).
 _CSHARP = r"""
 using System;
@@ -70,25 +72,9 @@ public static class SelectorArchivos {
 
     [DllImport("shell32.dll", CharSet = CharSet.Unicode, PreserveSig = true)]
     static extern int SHCreateItemFromParsingName(string ruta, IntPtr ctx, [MarshalAs(UnmanagedType.LPStruct)] Guid riid, out IShellItem item);
-    [DllImport("user32.dll")] static extern IntPtr GetForegroundWindow();
-    [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr ventana, IntPtr proceso);
-    [DllImport("kernel32.dll")] static extern uint GetCurrentThreadId();
-    [DllImport("user32.dll")] static extern bool AttachThreadInput(uint de, uint a, bool enganchar);
-    [DllImport("user32.dll")] static extern bool SetForegroundWindow(IntPtr ventana);
-    [DllImport("user32.dll")] static extern bool BringWindowToTop(IntPtr ventana);
-
     const uint FOS_OVERWRITEPROMPT = 0x2, FOS_NOCHANGEDIR = 0x8, FOS_PICKFOLDERS = 0x20, FOS_FORCEFILESYSTEM = 0x40;
     const uint FOS_PATHMUSTEXIST = 0x800, FOS_FILEMUSTEXIST = 0x1000;
     const uint SIGDN_FILESYSPATH = 0x80058000;
-
-    static void Adelante(IntPtr ventana) {
-        IntPtr delante = GetForegroundWindow();
-        uint suyo = GetWindowThreadProcessId(delante, IntPtr.Zero), mio = GetCurrentThreadId();
-        bool enganchado = suyo != 0 && suyo != mio && AttachThreadInput(mio, suyo, true);
-        BringWindowToTop(ventana);
-        SetForegroundWindow(ventana);
-        if (enganchado) AttachThreadInput(mio, suyo, false);
-    }
 
     // modo: "carpeta", "abrir" o "guardar". filtro: "Descripción|*.ext" (solo para archivos).
     public static string Elegir(string modo, string titulo, string inicial, string nombre, string filtro) {
@@ -100,7 +86,7 @@ public static class SelectorArchivos {
         dueno.Size = new System.Drawing.Size(1, 1);
         dueno.Opacity = 0;
         dueno.Show();
-        Adelante(dueno.Handle);
+        dueno.Activate();                                   // si Windows lo deja; si no, igual queda encima
         try {
             bool guardar = modo == "guardar";
             IFileDialog d = guardar ? (IFileDialog)new FileSaveDialog() : (IFileDialog)new FileOpenDialog();
