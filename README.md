@@ -36,6 +36,10 @@ instala con `AlignerTrimlineSetup-<versión>.exe`, que sale de cada release.
 5. **Movimientos.** Arrastrá el cursor de la línea de tiempo. Si en un movimiento la curva
    quedó corrida, mové el punto: queda un keyframe ahí y la curva avanza de a poco entre
    keyframes.
+   Si un movimiento no lleva offset o festoneado, el ⋯ arriba del cursor de la línea de tiempo
+   (o clic derecho sobre el movimiento, o las columnas Off. y Fest. de Modelos): ese movimiento va sin eso, en corte seco, y los
+   puntos de control no cambian. "Igual hasta el…" lo copia a los siguientes. En la línea de
+   tiempo queda marcado con o / f.
 6. **Exportar.** `<ID>.pts` con todas las curvas, `<ID> PC.pts` con los puntos de control y
    `<ID>.curva` con los datos del caso (un JSON), igual que los que ya consume el generador del KUKA.
    Los escribe el programa en la carpeta elegida ("Elegir carpeta…" abre el diálogo del

@@ -6,6 +6,8 @@ la generación de la curva, los keyframes y la exportación.
 from __future__ import annotations
 
 import base64
+import hashlib
+import json
 import os
 import re
 import threading
@@ -40,9 +42,25 @@ def _error(e: Exception) -> HTTPException:
     return HTTPException(status_code=404 if isinstance(e, KeyError) else 422, detail=str(e).strip("'\""))
 
 
+def _huella_del_codigo() -> str:
+    """Una huella del código del servidor (sus .py). La interfaz se sirve fresca del disco, pero
+    el servidor sigue con el código con el que arrancó: si cambió, hay que reiniciarlo."""
+    h = hashlib.sha1()
+    for f in sorted(Path(__file__).parent.rglob("*.py")):
+        try:
+            h.update(f.read_bytes())
+        except OSError:
+            pass
+    return h.hexdigest()[:12]
+
+
+_HUELLA = _huella_del_codigo()
+
+
 @app.get("/api/version")
 def version() -> dict:
-    return {"nombre": "aligner-trimline", "version": __version__}
+    # `reiniciar`: el código en el disco ya no es el que está corriendo
+    return {"nombre": "aligner-trimline", "version": __version__, "reiniciar": _huella_del_codigo() != _HUELLA}
 
 
 @app.post("/api/mallas")
@@ -241,8 +259,16 @@ def abrir_trabajo_de(cuerpo: dict) -> dict:
         return {"ruta": None}
     ruta = Path(ruta).expanduser()
     try:
-        trabajo, faltan = snapshot.abrir(ruta.read_bytes(), ruta.parent)
-    except (KeyError, ValueError, OSError) as e:
+        datos = ruta.read_bytes()
+        if cuerpo.get("listar"):
+            # qué modelos tiene, sin leerlos (un .trimline viejo, con las mallas adentro: ninguno)
+            nombres_ = [] if datos[:2] == b"PK" else [a.get("nombre", "") for a in json.loads(datos.decode("utf-8-sig")).get("archivos", [])]
+            return {"ruta": str(ruta), "nombres": nombres_}
+        if cuerpo.get("solo") is not None:
+            _, faltan = snapshot.abrir(datos, ruta.parent, solo=int(cuerpo["solo"]))
+            return {"ruta": str(ruta), "encontrado": not faltan}
+        trabajo, faltan = snapshot.abrir(datos, ruta.parent)
+    except (KeyError, ValueError, OSError, AttributeError) as e:
         raise HTTPException(status_code=422, detail=f"no se pudo abrir {ruta.name}: {str(e).strip(chr(39))}") from None
     return {"ruta": str(ruta), **_abierto(trabajo, faltan)}
 

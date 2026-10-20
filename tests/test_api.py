@@ -161,6 +161,13 @@ def test_modelos_arrastrados_se_encuentran_junto_al_trimline(domo_stl, tmp_path)
     a = cliente.post("/api/trabajo/abrir-de", json={"ruta": str(destino)}).json()
     assert a["faltan"] == [] and a["mallas"][0]["id"] == m["id"] and a["mallas"][0]["ruta"].endswith(nombre)
 
+    # de a uno: la lista, cada modelo, y al final todo junto
+    mallas.descartar(m["id"])
+    assert cliente.post("/api/trabajo/abrir-de", json={"ruta": str(destino), "listar": True}).json()["nombres"] == [nombre]
+    assert cliente.post("/api/trabajo/abrir-de", json={"ruta": str(destino), "solo": 0}).json()["encontrado"]
+    assert mallas.obtener(m["id"])
+    assert cliente.post("/api/trabajo/abrir-de", json={"ruta": str(destino)}).json()["faltan"] == []
+
 
 def test_curva_de_referencia():
     suelta = "0 20.9 -9.5\r\n0.83 20.88 -9.62\r\n1.6 20.85 -9.3\r\n"
@@ -207,3 +214,10 @@ def test_respaldo_sin_carpeta_va_a_los_datos(domo_stl, tmp_path, monkeypatch):
     trabajo = {"id": "0048", "archivos": [{"malla": m["id"], "nombre": "0048 Caso Prueba 1.0 sup 00.stl", "maxilar": "sup", "mov": "00", "usar": True}]}
     r = cliente.post("/api/trabajo/guardar-en", json={"trabajo": trabajo, "respaldo": True, "nombre": "../0048.trimline.bak"}).json()
     assert r["ruta"] == str(tmp_path / "respaldos" / "0048.trimline.bak") and Path(r["ruta"]).is_file()
+
+
+def test_avisa_si_el_codigo_cambio(monkeypatch):
+    from trimline import app as modulo
+    assert cliente.get("/api/version").json()["reiniciar"] is False
+    monkeypatch.setattr(modulo, "_HUELLA", "otra")
+    assert cliente.get("/api/version").json()["reiniciar"] is True

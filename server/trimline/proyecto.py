@@ -13,6 +13,8 @@ Un maxilar es:
          "offset": true, "festoneado": true},                  # opcional: si lo mueven los deslizadores
       ],
       "inversas": {"c1|c2": [dx, dy, dz]},                     # opcional: crestas inversas corridas a mano
+      "sinAjuste": {"05": {"offset": false, "festoneado": false}},  # opcional: movimientos que no
+                                                              # llevan offset o festoneado (corte seco)
     }
 
 `claves` son los KEYFRAMES del controlador: posiciones absolutas en los movimientos donde el
@@ -49,6 +51,9 @@ def resolver(maxilar: dict, num: str, n: int | None = 500, paso: float | None = 
     movs = maxilar["movimientos"]
     nums = [m["num"] for m in movs]
     malla = mallas.obtener(next(m["malla"] for m in movs if m["num"] == num))
+    # en este movimiento, ¿va sin offset o sin festoneado? Es como si ningún controlador los
+    # siguiera: los puntos y los deslizadores no cambian, y los demás movimientos tampoco
+    sin = (maxilar.get("sinAjuste") or {}).get(num) or {}
     ctrl = []
     for c in maxilar.get("controladores", []):
         p = posicion(c, nums, num)
@@ -56,7 +61,8 @@ def resolver(maxilar: dict, num: str, n: int | None = 500, paso: float | None = 
             continue
         ctrl.append({"id": c["id"], "tipo": c["tipo"], "pos": p, "clave": num in c.get("claves", {}),
                      "manijas": c.get("manijas"),
-                     "offset": c.get("offset", True), "festoneado": c.get("festoneado", True)})
+                     "offset": c.get("offset", True) and sin.get("offset", True) is not False,
+                     "festoneado": c.get("festoneado", True) and sin.get("festoneado", True) is not False})
     if ctrl:
         sobre = malla.mas_cercano(np.array([c["pos"] for c in ctrl]))
         for c, p in zip(ctrl, sobre):

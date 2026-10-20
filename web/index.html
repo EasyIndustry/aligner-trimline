@@ -20,6 +20,9 @@
   <main>
     <div id="visor"></div>
     <div id="estado"></div>
+    <div id="aviso-reinicio" role="alert" hidden>
+      El programa se actualizó mientras estaba abierto: cerralo con <b>Salir</b> (en Trabajo) y abrilo de nuevo. Hasta entonces, abrir o crear proyectos puede fallar.
+    </div>
     <div id="caja" hidden></div>
     <label id="opacidad" title="Transparencia del modelo, para ver la curva si queda detrás">
       <span>Modelo</span>
@@ -27,6 +30,13 @@
       <output id="opacidad-valor">100%</output>
     </label>
     <button id="mostrar-panel" type="button" title="Mostrar el panel" hidden>‹</button>
+    <div id="menu-mov" role="menu" hidden>
+      <div class="titulo-menu"></div>
+      <label><input type="checkbox" data-campo="offset" /> Lleva offset</label>
+      <label><input type="checkbox" data-campo="festoneado" /> Lleva festoneado</label>
+      <label class="hasta">Igual hasta el <select id="menu-hasta"></select></label>
+      <p class="nota">Los puntos no cambian: solo este movimiento va sin lo destildado.</p>
+    </div>
     <div id="vacio" hidden>
       <p>No hay ningún proyecto abierto.</p>
       <div class="botones cols-2">
@@ -35,6 +45,11 @@
       </div>
     </div>
   </main>
+  <dialog id="carga">
+    <h1 id="carga-titulo"></h1>
+    <progress max="1"></progress>
+    <p id="carga-texto" class="nota"></p>
+  </dialog>
   <dialog id="asistente">
     <form method="dialog">
       <h1>Nuevo proyecto</h1>
@@ -106,10 +121,10 @@
         </div>
         <label class="fila">ID del caso <input id="caso" type="text" placeholder="0044" /></label>
         <table id="tabla">
-          <thead><tr><th title="Usar este movimiento">Usar</th><th>Archivo</th><th>Maxilar</th><th>Mov.</th></tr></thead>
+          <thead><tr><th title="Usar este movimiento">Usar</th><th>Archivo</th><th>Maxilar</th><th>Mov.</th><th title="Destildado: ese movimiento va sin offset (los puntos no cambian)">Off.</th><th title="Destildado: ese movimiento va sin festoneado (los puntos no cambian)">Fest.</th></tr></thead>
           <tbody></tbody>
         </table>
-        <p class="nota" id="nota-carga">Destildá los movimientos que no se usan. El primero tildado de cada maxilar es la base.</p>
+        <p class="nota" id="nota-carga">Destildá los movimientos que no se usan. El primero tildado de cada maxilar es la base. Off. y Fest.: destildalos en un movimiento que no lleva offset o festoneado (también con clic derecho en la línea de tiempo).</p>
         <h2>Curvas de referencia</h2>
         <p class="nota">Un .pts hecho antes (o por otro programa) se dibuja en verde encima del modelo, solo para comparar. También se puede arrastrar.</p>
         <div class="botones cols-2">
@@ -163,7 +178,7 @@
         </div>
         <div id="versiones"></div>
         <h2>Mouse y teclado</h2>
-        <p class="ayuda">Clic izquierdo: marcar (con un modo prendido) y mover puntos, también los intermedios; con un punto elegido, arrastrar sus manijas ajusta ese festón.<br />Shift + arrastrar con el izquierdo: elegir varios puntos.<br />Clic derecho: orbitar.<br />Shift + clic derecho: desplazar.<br />Rueda: zoom.<br />← →: cambiar de movimiento.<br />1, 2, 3: prender o apagar un modo; Esc: apagarlo.<br />Ctrl+Z / Ctrl+Y: deshacer y rehacer. Ctrl+S: guardar.</p>
+        <p class="ayuda">Clic izquierdo: marcar (con un modo prendido) y mover puntos, también los intermedios; con un punto elegido, arrastrar sus manijas ajusta ese festón.<br />Shift + arrastrar con el izquierdo: elegir varios puntos.<br />Clic derecho: orbitar.<br />Shift + clic derecho: desplazar.<br />Rueda: zoom.<br />← →: cambiar de movimiento.<br />⋯ arriba del cursor de la línea de tiempo, o clic derecho sobre un movimiento: si lleva offset y festoneado (o / f marca los que no).<br />1, 2, 3: prender o apagar un modo; Esc: apagarlo.<br />Ctrl+Z / Ctrl+Y: deshacer y rehacer. Ctrl+S: guardar.</p>
       </section>
     </div>
 

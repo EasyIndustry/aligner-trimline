@@ -53,12 +53,15 @@ def _misma(ruta: Path, ident: str) -> str | None:
     return None
 
 
-def abrir(datos: bytes, carpeta: str | Path | None = None) -> tuple[dict, list[dict]]:
+def abrir(datos: bytes, carpeta: str | Path | None = None, solo: int | None = None) -> tuple[dict, list[dict]]:
     """Devuelve el trabajo y los archivos cuyos modelos no se encontraron.
 
     Cada modelo se busca en su ruta y, si no está, por nombre en `carpeta` (donde está el
     .trimline, si se sabe). Los que se encuentran quedan cargados; si el STL cambió desde que se
     guardó, el archivo pasa a apuntar a la malla nueva.
+
+    Con `solo` carga únicamente ese archivo (su índice): la interfaz los pide de a uno para
+    mostrar cuál está leyendo, y al final abre todo (ya cargado, es inmediato).
     """
     if datos[:2] == b"PK":
         return _abrir_zip(datos), []
@@ -69,7 +72,10 @@ def abrir(datos: bytes, carpeta: str | Path | None = None) -> tuple[dict, list[d
     if not isinstance(trabajo, dict) or trabajo.get("formato") != FORMATO:
         raise ValueError("no es un trabajo de aligner-trimline")
     encontrados, faltan = [], []
-    for a in trabajo.get("archivos", []):
+    archivos = trabajo.get("archivos", [])
+    if solo is not None:
+        archivos = archivos[solo:solo + 1]
+    for a in archivos:
         candidatas = [Path(a["ruta"])] if a.get("ruta") else []
         if carpeta:
             candidatas += [Path(carpeta) / a.get("nombre", "")]

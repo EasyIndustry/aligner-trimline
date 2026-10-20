@@ -258,3 +258,19 @@ def test_lingual_con_sus_propios_ajustes(malla):
             assert not np.allclose(a, b, atol=1e-3)
     aj = curva.ajustes(0.0, 2.0, 0.4, {"amplitud": 0.0, "ancho": 0.6})
     assert aj["e"] == {"offset": 0.0, "amplitud": 1.0, "ancho": 0.5}   # los extremos, a mitad
+
+
+def test_un_movimiento_sin_offset_ni_festoneado(malla):
+    m = maxilar(malla, amplitud=3.0, offset=1.5, sinAjuste={"02": {"offset": False, "festoneado": False}})
+    plano = proyecto.resolver(maxilar(malla), "02")["tramos"][0]["claves"]
+    con = proyecto.resolver(m, "01")["tramos"][0]["claves"]
+    sin = proyecto.resolver(m, "02")["tramos"][0]["claves"]
+    # corte seco: el 02 queda como sin deslizadores, el 01 (y el 03) con todo
+    assert np.allclose(sin, plano, atol=1e-6) and not np.allclose(con, plano, atol=0.5)
+    assert np.allclose(proyecto.resolver(m, "03")["tramos"][0]["claves"], con, atol=1e-6)
+    # solo sin festoneado: el offset sigue moviendo todo
+    m["sinAjuste"] = {"02": {"festoneado": False}}
+    solo = proyecto.resolver(m, "02")["tramos"][0]
+    i = next(k for k, info in enumerate(solo["info"]) if info.get("clave") == "v2|v3")
+    assert plano[i][2] + 0.5 < solo["claves"][i][2] < con[i][2] - 1.0
+    assert m["controladores"][0]["claves"] == anillo()[0]["claves"]          # los puntos no se tocan

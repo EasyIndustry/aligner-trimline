@@ -53,7 +53,15 @@ let claveRespaldo = '';
 let esperaRespaldo = 0;
 
 const visor = await crearVisor($('visor'));
-const hud = crearHud(visor.motor, { alMovimiento: irA, alDeslizar: deslizar, alBoton: (id) => { if (id === 'candado') candado(); } });
+const hud = crearHud(visor.motor, {
+  alMovimiento: irA, alDeslizar: deslizar, alBoton: (id) => { if (id === 'candado') candado(); },
+  // el ⋯ arriba del cursor: el mismo menú que el clic derecho (un segundo clic lo cierra)
+  alMenu: (num, x, y) => {
+    if (menuRecienCerrado === num) return;
+    const r = visor.lienzo.getBoundingClientRect();
+    abrirMenuMov(num, { clientX: r.left + x, clientY: r.top + y }, true);
+  },
+});
 
 // ---------- avisos ----------
 let borrarAviso = 0;
@@ -63,6 +71,22 @@ function avisar(texto, error = false) {
   clearTimeout(borrarAviso);
   if (texto) borrarAviso = setTimeout(() => { e.textContent = ''; }, error ? 8000 : 3500);
 }
+
+// ---------- el cartel de carga (abrir o crear un proyecto) ----------
+const carga = /** @type {HTMLDialogElement} */ ($('carga'));
+carga.addEventListener('cancel', (ev) => ev.preventDefault());   // Esc no lo cierra: termina solo
+function mostrarCarga(titulo) {
+  $('carga-titulo').textContent = titulo;
+  progresoCarga('');
+  if (!carga.open) carga.showModal();
+}
+/** Sin `total`, la barra va y viene (no se sabe cuánto falta). */
+function progresoCarga(texto, hechos = 0, total = 0) {
+  const barra = /** @type {HTMLProgressElement} */ (carga.querySelector('progress'));
+  if (total) { barra.max = total; barra.value = hechos; } else barra.removeAttribute('value');
+  $('carga-texto').textContent = texto;
+}
+function cerrarCarga() { if (carga.open) carga.close(); }
 
 // ---------- lo que se deriva del estado ----------
 /** Los movimientos elegidos de un maxilar, en orden: [{ num, malla }]. */
@@ -74,6 +98,23 @@ function movimientos(maxilar) {
     .map((a) => ({ num: a.mov, malla: a.malla }));
 }
 const base = (maxilar) => movimientos(maxilar)[0]?.num ?? null;
+/** Lo que no lleva un movimiento del maxilar: { offset?: false, festoneado?: false }. */
+const sinAjusteDe = (maxilar, num) => estado.maxilares[maxilar]?.sinAjuste?.[num] ?? {};
+/** Pone o saca una excepción (corte seco) en unos movimientos. Los puntos no se tocan. */
+function ponerAjuste(maxilar, nums, campo, lleva) {
+  const max = estado.maxilares[maxilar];
+  if (!max) return;
+  recordar();
+  const sa = { ...max.sinAjuste };
+  for (const num of nums) {
+    const e = { ...sa[num] };
+    if (lleva) delete e[campo]; else e[campo] = false;
+    if (Object.keys(e).length) sa[num] = e; else delete sa[num];
+  }
+  if (Object.keys(sa).length) max.sinAjuste = sa; else delete max.sinAjuste;
+  pintarPanel();
+  if (maxilar === estado.maxilar) resolverTodo();
+}
 const actual = () => (estado.maxilar ? estado.maxilares[estado.maxilar] : null);
 /** El maxilar como lo entiende el servidor. */
 const paraServidor = (maxilar) => ({ ...estado.maxilares[maxilar], movimientos: movimientos(maxilar) });
@@ -348,9 +389,12 @@ visor.lienzo.addEventListener('pointerdown', (ev) => {
 
 visor.lienzo.addEventListener('pointermove', (ev) => {
   const [x, y] = enLienzo(ev);
-  if (hud.arrastrando) { hud.mover(x); return; }
+  if (hud.arrastrando) { hud.mover(x); visor.lienzo.style.cursor = 'grabbing'; return; }
   if (caja) { pintarCaja(x, y); return; }
   if (!arrastre) {
+    // sobre un control del visor (línea de tiempo, deslizadores, ⋯): la mano o el dedo
+    const mano = ev.buttons === 0 ? hud.encima(x, y) : null;
+    if (mano) { visor.resaltar(null); visor.lienzo.style.cursor = mano; return; }
     // sin arrastrar: el punto cercano se agranda, para saber que el clic lo agarra
     if (ev.buttons === 0) {
       const manija = estado.seleccion ? visor.manijaEn(x, y) : null;
@@ -396,7 +440,7 @@ visor.lienzo.addEventListener('pointermove', (ev) => {
 
 function soltar(ev) {
   const [x, y] = enLienzo(ev);
-  if (hud.arrastrando) { hud.soltar(x); return; }
+  if (hud.arrastrando) { hud.soltar(x); visor.lienzo.style.cursor = hud.encima(x, y) ?? ''; return; }
   if (caja) {
     // los de adentro se suman a la selección
     const ids = visor.controladoresEn(caja.x0, caja.y0, x, y);
@@ -419,7 +463,74 @@ function soltar(ev) {
 }
 visor.lienzo.addEventListener('pointerup', soltar);
 visor.lienzo.addEventListener('pointercancel', soltar);
-visor.lienzo.addEventListener('contextmenu', (ev) => ev.preventDefault());
+visor.lienzo.addEventListener('pointerleave', () => { hud.encima(-1e4, -1e4); visor.lienzo.style.cursor = ''; });
+// el menú del navegador no: en Windows el clic derecho llega al soltar, y para entonces el
+// mouse ya está sobre nuestro menú (no sobre el lienzo)
+document.querySelector('main')?.addEventListener('contextmenu', (ev) => ev.preventDefault());
+
+// clic derecho sobre un movimiento de la línea de tiempo: si lleva offset y festoneado. Se
+// atrapa antes que la cámara (que orbita con el derecho).
+const menuMov = $('menu-mov');
+let menuNum = /** @type {string | null} */ (null);
+/** El movimiento cuyo menú se cerró con este mismo clic (para que el ⋯ abra y cierre). */
+let menuRecienCerrado = /** @type {string | null} */ (null);
+/** `arriba`: desde el ⋯ (en `ev`, su borde de abajo): el menú va encima, sin taparlo. */
+function abrirMenuMov(num, ev, arriba = false) {
+  menuNum = num;
+  pintarMenuMov();
+  const caja = $('visor').getBoundingClientRect();
+  menuMov.hidden = false;
+  const x = Math.min(ev.clientX - caja.left - (arriba ? menuMov.offsetWidth / 2 : 0), caja.width - menuMov.offsetWidth - 8);
+  const y = arriba ? ev.clientY - caja.top - 30 - menuMov.offsetHeight
+    : Math.min(ev.clientY - caja.top, caja.height - menuMov.offsetHeight - 8);
+  Object.assign(menuMov.style, { left: `${Math.max(8, x)}px`, top: `${Math.max(8, y)}px` });
+}
+function cerrarMenuMov() { menuMov.hidden = true; menuNum = null; }
+function pintarMenuMov() {
+  if (!menuNum || !estado.maxilar) return;
+  const s = sinAjusteDe(estado.maxilar, menuNum);
+  /** @type {HTMLElement} */ (menuMov.querySelector('.titulo-menu')).textContent = `${MAXILARES[estado.maxilar]} · movimiento ${menuNum}`;
+  for (const caja of /** @type {NodeListOf<HTMLInputElement>} */ (menuMov.querySelectorAll('input[data-campo]'))) {
+    caja.checked = s[/** @type {string} */ (caja.dataset.campo)] !== false;
+  }
+  const nums = movimientos(estado.maxilar).map((m) => m.num);
+  const despues = nums.slice(nums.indexOf(menuNum) + 1);
+  const hasta = /** @type {HTMLSelectElement} */ ($('menu-hasta'));
+  hasta.replaceChildren(new Option('—', ''), ...despues.map((n) => new Option(n, n)));
+  /** @type {HTMLElement} */ (hasta.closest('label')).hidden = !despues.length;
+}
+$('visor').addEventListener('pointerdown', (ev) => {
+  menuRecienCerrado = null;
+  if (!menuMov.hidden && !menuMov.contains(/** @type {Node} */ (ev.target))) { menuRecienCerrado = menuNum; cerrarMenuMov(); }
+  if (ev.button !== 2 || !estado.maxilar) return;
+  const [x, y] = enLienzo(ev);
+  const num = hud.movimientoEn(x, y);
+  if (!num) return;
+  ev.stopPropagation();                                       // que no orbite
+  abrirMenuMov(num, ev);
+}, { capture: true });
+for (const caja of /** @type {NodeListOf<HTMLInputElement>} */ (menuMov.querySelectorAll('input[data-campo]'))) {
+  caja.addEventListener('change', () => {
+    if (menuNum && estado.maxilar) ponerAjuste(estado.maxilar, [menuNum], /** @type {string} */ (caja.dataset.campo), caja.checked);
+    pintarMenuMov();
+  });
+}
+// "igual hasta el": copia lo de este movimiento a los siguientes, hasta el elegido
+$('menu-hasta').addEventListener('change', (ev) => {
+  const hasta = /** @type {HTMLSelectElement} */ (ev.target).value;
+  if (!hasta || !menuNum || !estado.maxilar) return;
+  const nums = movimientos(estado.maxilar).map((m) => m.num);
+  const tramo = nums.slice(nums.indexOf(menuNum), nums.indexOf(hasta) + 1);
+  const s = sinAjusteDe(estado.maxilar, menuNum);
+  const max = estado.maxilares[estado.maxilar];
+  recordar();
+  const sa = { ...max.sinAjuste };
+  for (const n of tramo) { if (Object.keys(s).length) sa[n] = { ...s }; else delete sa[n]; }
+  if (Object.keys(sa).length) max.sinAjuste = sa; else delete max.sinAjuste;
+  avisar(`Movimientos ${menuNum} a ${hasta}: ${s.offset === false || s.festoneado === false ? `sin ${[s.offset === false && 'offset', s.festoneado === false && 'festoneado'].filter(Boolean).join(' ni ')}` : 'con offset y festoneado'}.`);
+  cerrarMenuMov();
+  pintarPanel(); resolverTodo();
+});
 
 let antesDeDeslizar = /** @type {string | null} */ (null);
 function deslizar(id, valor, final) {
@@ -517,7 +628,7 @@ window.addEventListener('keydown', (ev) => {
   else if (ev.key === '1') elegirModo('v');
   else if (ev.key === '2') elegirModo('l');
   else if (ev.key === '3') elegirModo('e');
-  else if (ev.key === 'Escape') { estado.modo = null; pintarPanel(); }
+  else if (ev.key === 'Escape') { if (!menuMov.hidden) cerrarMenuMov(); else { estado.modo = null; pintarPanel(); } }
   else return;
   ev.preventDefault();
 });
@@ -532,15 +643,23 @@ function pintarHud() {
   const nums = movimientos(estado.maxilar).map((m) => m.num);
   const claves = new Set(max.controladores.flatMap((c) => Object.keys(c.claves)));
   const sel = max.controladores.find((c) => c.id === estado.seleccion);
+  // los movimientos que van sin offset (o) o sin festoneado (f)
+  const marcas = Object.fromEntries(nums.map((n) => {
+    const s = sinAjusteDe(estado.maxilar, n);
+    return [n, `${s.offset === false ? 'o' : ''}${s.festoneado === false ? 'f' : ''}`];
+  }).filter(([, m]) => m));
+  const aca = sinAjusteDe(estado.maxilar, estado.num);
+  const sinAca = [aca.offset === false && 'offset', aca.festoneado === false && 'festoneado'].filter(Boolean);
+  const apagado = (id) => (id === 'offset' && aca.offset === false) || (id === 'amplitud' && aca.festoneado === false);
   hud.definir({
     linea: {
-      titulo: `${MAXILARES[estado.maxilar]} · movimiento ${estado.num}${estado.num === nums[0] ? ' (base)' : ''}`,
-      nums, actual: estado.num, claves, clavesSel: new Set(sel ? Object.keys(sel.claves) : []),
+      titulo: `${MAXILARES[estado.maxilar]} · movimiento ${estado.num}${estado.num === nums[0] ? ' (base)' : ''}${sinAca.length ? ` · sin ${sinAca.join(' ni ')}` : ''}`,
+      nums, actual: estado.num, claves, clavesSel: new Set(sel ? Object.keys(sel.claves) : []), marcas,
     },
     deslizadores: max.lingual
-      ? [...DESLIZADORES.map((d) => ({ ...d, titulo: `${d.titulo} V`, valor: max[d.id], fila: 1 })),
-         ...DESLIZADORES.map((d) => ({ ...d, id: `l.${d.id}`, titulo: `${d.titulo} L`, valor: max.lingual[d.id] ?? max[d.id], fila: 0 }))]
-      : DESLIZADORES.map((d) => ({ ...d, valor: max[d.id] })),
+      ? [...DESLIZADORES.map((d) => ({ ...d, titulo: `${d.titulo} V`, valor: max[d.id], fila: 1, apagado: apagado(d.id) })),
+         ...DESLIZADORES.map((d) => ({ ...d, id: `l.${d.id}`, titulo: `${d.titulo} L`, valor: max.lingual[d.id] ?? max[d.id], fila: 0, apagado: apagado(d.id) }))]
+      : DESLIZADORES.map((d) => ({ ...d, valor: max[d.id], apagado: apagado(d.id) })),
     botones: [{
       id: 'candado', texto: max.lingual ? '🔓' : '🔒', activo: !max.lingual,
       leyenda: max.lingual ? 'V ≠ L' : 'V = L',
@@ -558,7 +677,11 @@ function pintarPanel() {
     tr.innerHTML = `<td><input type="checkbox" data-i="${i}" data-campo="usar" ${a.usar ? 'checked' : ''}></td>
       <td class="nombre"></td>
       <td><select data-i="${i}" data-campo="maxilar"><option value="">?</option>${Object.entries(MAXILARES).map(([k, t]) => `<option value="${k}" ${a.maxilar === k ? 'selected' : ''}>${t.slice(0, 3)}</option>`).join('')}</select></td>
-      <td><input type="text" data-i="${i}" data-campo="mov" value="${a.mov}" maxlength="3"></td>`;
+      <td><input type="text" data-i="${i}" data-campo="mov" value="${a.mov}" maxlength="3"></td>
+      ${['offset', 'festoneado'].map((campo) => {
+        const sin = a.maxilar && a.mov ? sinAjusteDe(a.maxilar, a.mov)[campo] === false : false;
+        return `<td class="aj"><input type="checkbox" data-i="${i}" data-campo="aj-${campo}" ${sin ? '' : 'checked'} ${a.usar && a.maxilar && a.mov ? '' : 'disabled'}></td>`;
+      }).join('')}`;
     const nombre = /** @type {HTMLElement} */ (tr.querySelector('.nombre'));
     nombre.textContent = a.nombre; nombre.title = a.nombre;
     return tr;
@@ -614,6 +737,10 @@ $('tabla').addEventListener('change', (ev) => {
   const el = /** @type {HTMLInputElement} */ (ev.target);
   const a = estado.archivos[Number(el.dataset.i)];
   if (!a) return;
+  if (el.dataset.campo?.startsWith('aj-')) {
+    if (a.maxilar && a.mov) ponerAjuste(a.maxilar, [a.mov], el.dataset.campo.slice(3), el.checked);
+    return;
+  }
   if (el.dataset.campo === 'usar') a.usar = el.checked;
   else if (el.dataset.campo === 'maxilar') a.maxilar = el.value || null;
   else if (el.dataset.campo === 'mov') a.mov = el.value.trim() === '' ? '' : el.value.trim().padStart(2, '0');
@@ -886,9 +1013,13 @@ async function elegirCarpetaAsistente() {
     const { carpeta } = await api.elegirCarpeta(inicial, 'Carpeta con los modelos del caso');
     if (!carpeta) return;
     const vez = vezAsistente;
-    const { nombres } = await api.modelosDeCarpeta(carpeta);
+    const lista = await api.modelosDeCarpeta(carpeta);
     if (!carpetasElegidas.includes(carpeta)) carpetasElegidas.push(carpeta);
-    await leerModelos(nombres, nombres, (nombre) => api.mallasDeCarpeta(carpeta, [nombre]), vez);
+    // un servidor de antes no sabe listar: ya leyó toda la carpeta
+    const nombres = Array.isArray(lista.nombres) ? lista.nombres : (lista.mallas ?? []).map((m) => m.nombre);
+    const leer = Array.isArray(lista.nombres) ? (nombre) => api.mallasDeCarpeta(carpeta, [nombre])
+      : (nombre) => ({ mallas: lista.mallas.filter((m) => m.nombre === nombre), errores: [] });
+    await leerModelos(nombres, nombres, leer, vez);
     if (!nombres.length) notaAsistente(`No hay modelos (.stl, .ply, .obj) en ${carpeta}.`, true);
   } catch (e) { notaAsistente(e.message, true); leyendo = null; pintarAsistente(); }
 }
@@ -1000,14 +1131,16 @@ async function crearProyecto() {
   propuestos = []; carpetasElegidas = [];
   nuevoProyecto(usados.map((p) => p.id));
   /** @type {HTMLInputElement} */ ($('caso')).value = caso;
+  mostrarCarga(`Creando el proyecto ${caso}`.trim());
   let hechos = 0;
   for (const p of usados) {
-    avisar(`Cargando ${++hechos} de ${usados.length}: ${p.nombre}`);
+    progresoCarga(`Preparando ${++hechos} de ${usados.length}: ${p.nombre}`, hechos - 1, usados.length);
     try {
       if (!visor.tiene(p.id)) visor.registrar(p.id, await api.bajarMalla(p.id));
     } catch (e) { avisar(e.message, true); continue; }
     estado.archivos.push({ malla: p.id, nombre: p.nombre, arriba: p.arriba, ruta: p.ruta, maxilar: p.maxilar, mov: p.mov, usar: true });
   }
+  cerrarCarga();
   finCarga();
   irAPaso('puntos');
   await respaldar();
@@ -1095,8 +1228,9 @@ function abrirJson(t) {
 
 /** Un .trimline: queda todo como estaba al guardarlo. Los modelos se leen de donde estaban. */
 async function abrirTrabajo(archivo) {
-  avisar('Abriendo…');
-  await aplicarTrabajo(await api.abrirTrabajo(archivo), archivo.name);
+  mostrarCarga(`Abriendo ${archivo.name}`);
+  progresoCarga('Leyendo los modelos…');
+  try { await aplicarTrabajo(await api.abrirTrabajo(archivo), archivo.name); } finally { cerrarCarga(); }
   marcarGuardado(null, archivo.name);
   firmaRespaldo = firma();
 }
@@ -1105,7 +1239,7 @@ async function aplicarTrabajo({ trabajo: t, mallas, faltan }, nombre) {
   const arriba = Object.fromEntries(mallas.map((m) => [m.id, m.arriba]));
   let hechas = 0;
   for (const id of Object.keys(arriba)) {
-    avisar(`Abriendo: malla ${++hechas} de ${mallas.length}`);
+    progresoCarga(`Preparando la vista: ${++hechas} de ${mallas.length}`, hechas - 1, mallas.length);
     if (!visor.tiene(id)) visor.registrar(id, await api.bajarMalla(id));
   }
   const rutas = Object.fromEntries(mallas.map((m) => [m.id, m.ruta]));
@@ -1138,9 +1272,21 @@ async function aplicarTrabajo({ trabajo: t, mallas, faltan }, nombre) {
 async function abrirRuta(ruta = null, preguntar = true) {
   if (preguntar && !descartarCambios('abrir otro')) return;
   try {
-    const r = await api.abrirDe({ ruta, inicial: carpetaDe(rutaTrabajo) ?? carpetaDe(estado.archivos.find((a) => a.ruta)?.ruta) });
-    if (!r.ruta) return;
-    avisar('Abriendo…');
+    const lista = await api.abrirDe({ ruta, inicial: carpetaDe(rutaTrabajo) ?? carpetaDe(estado.archivos.find((a) => a.ruta)?.ruta), listar: true });
+    if (!lista.ruta) return;
+    // de a uno, para mostrar cuál se está leyendo; al final se abre todo junto (ya leído)
+    mostrarCarga(`Abriendo ${lista.ruta.split(/[\\/]/).pop()}`);
+    let r = lista;
+    // un servidor de antes no sabe listar: ya contestó con todo abierto
+    if (Array.isArray(lista.nombres)) {
+      const total = lista.nombres.length;
+      for (const [i, nombre] of lista.nombres.entries()) {
+        progresoCarga(`Leyendo ${i + 1} de ${total}: ${nombre}`, i, total);
+        await api.abrirDe({ ruta: lista.ruta, solo: i });
+      }
+      progresoCarga('Armando el proyecto…');
+      r = await api.abrirDe({ ruta: lista.ruta });
+    }
     await aplicarTrabajo(r, r.ruta);
     if (/\.bak$/i.test(r.ruta)) {
       marcarGuardado(null, '');
@@ -1153,7 +1299,7 @@ async function abrirRuta(ruta = null, preguntar = true) {
   } catch (e) {
     if (e.status === 501 && !ruta) $('trabajo').click();     // sin diálogos: el del navegador
     else avisar(`No se pudo abrir: ${e.message}`, true);
-  }
+  } finally { cerrarCarga(); }
 }
 $('abrir').addEventListener('click', () => abrirRuta());
 $('vacio-abrir').addEventListener('click', () => abrirRuta());
@@ -1238,6 +1384,13 @@ api.exportadores().then(({ exportadores }) => {
 }).catch((e) => avisar(e.message, true));
 setInterval(api.latido, 5000);
 api.latido();
+// si el código del servidor cambió desde que arrancó (se actualizó con el programa abierto), avisar
+async function revisarServidor() {
+  try { $('aviso-reinicio').hidden = !(await api.version()).reiniciar; } catch { /* se está reiniciando */ }
+}
+revisarServidor();
+setInterval(revisarServidor, 20000);
+window.addEventListener('focus', revisarServidor);
 pintarPanel();
 // para probar y depurar desde la consola
 Object.assign(window, { trimline: { estado, curvas, visor, hud, irA, elegirMaxilar, movimientos } });
