@@ -15,7 +15,13 @@ Un maxilar es:
       "inversas": {"c1|c2": [dx, dy, dz]},                     # opcional: crestas inversas corridas a mano
       "sinAjuste": {"05": {"offset": false, "festoneado": false}},  # opcional: movimientos que no
                                                               # llevan offset o festoneado (corte seco)
+      "adicionales": {"X18": {"origen": "18", "offset": ..., "amplitud": ..., "ancho": ...,
+                              "controladores": [...], "inversas": {...}}},  # opcional, ver abajo
     }
+
+Una curva ADICIONAL es una curva de más, sobre la malla de un movimiento (`origen`), que se
+ajusta por su cuenta: tiene sus propios controladores (con keyframe en su número, `X18`) y sus
+propios deslizadores. Arranca como copia de ese movimiento y se exporta en un archivo aparte.
 
 `claves` son los KEYFRAMES del controlador: posiciones absolutas en los movimientos donde el
 usuario lo puso o lo movió. Entre dos keyframes la posición avanza de a poco, movimiento a
@@ -73,6 +79,15 @@ def resolver(maxilar: dict, num: str, n: int | None = 500, paso: float | None = 
     res["controladores"] = ctrl
     res["num"] = num
     return res
+
+
+def adicional(maxilar: dict, num: str) -> dict:
+    """La curva adicional `num` como un maxilar de un solo movimiento (sobre la malla de su origen)."""
+    ad = (maxilar.get("adicionales") or {})[num]
+    malla = next((m["malla"] for m in maxilar["movimientos"] if m["num"] == ad.get("origen")), None)
+    if malla is None:
+        raise ValueError(f"{num}: el movimiento {ad.get('origen')}, del que es copia, no está elegido")
+    return {**ad, "movimientos": [{"num": num, "malla": malla}]}
 
 
 def con_keyframe(maxilar: dict) -> list[str]:

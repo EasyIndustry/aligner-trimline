@@ -7,7 +7,7 @@ import * as THREE from 'three';
 const COLOR = {
   linea: 0xdddddd, tenue: 0x8a8a8a, fondo: 0x161616, cursor: 0x6aa3ff,
   clave: 0xaaaaaa, claveSel: 0xffc21a, perilla: 0x6aa3ff, texto: '#eeeeee',
-  sinAjuste: '#ffb347', apagado: '#9a9a9a', realce: 0x9cc3ff,
+  sinAjuste: '#ffb347', apagado: '#9a9a9a', realce: 0x9cc3ff, adicional: '#7fd18b',
 };
 const MARGEN = 56;          // a los costados de la línea de tiempo
 const BANDA = 22;           // cuánto se puede errar con el mouse, en píxeles
@@ -99,7 +99,7 @@ export function crearHud(motor, { alMovimiento, alDeslizar, alBoton, alMenu }) {
   }
 
   function pintarLinea(W, H) {
-    const { nums, actual, claves, clavesSel, titulo, marcas = {} } = modelo.linea;
+    const { nums, actual, claves, clavesSel, titulo, marcas = {}, extra = new Set() } = modelo.linea;
     if (!nums.length) return;
     const x0 = MARGEN, x1 = Math.max(W - MARGEN, x0 + 40), y = H - 44;
     const xDe = (i) => (nums.length === 1 ? (x0 + x1) / 2 : x0 + ((x1 - x0) * i) / (nums.length - 1));
@@ -108,8 +108,9 @@ export function crearHud(motor, { alMovimiento, alDeslizar, alBoton, alMenu }) {
     const cada = Math.max(1, Math.ceil((nums.length * 26) / Math.max(x1 - x0, 1)));   // que los números no se pisen
     nums.forEach((num, i) => {
       const x = xDe(i);
-      rect(x - 0.75, y - 6, 1.5, 12, COLOR.linea);
-      if (i % cada === 0 || num === actual) texto(num, x, y + 18, { alinear: 0.5, px: 11 });
+      // las curvas adicionales (X18), al final y en otro color
+      rect(x - 0.75, y - 6, 1.5, 12, extra.has(num) ? 0x7fd18b : COLOR.linea);
+      if (i % cada === 0 || num === actual || extra.has(num)) texto(num, x, y + 18, { alinear: 0.5, px: 11, color: extra.has(num) ? COLOR.adicional : COLOR.texto });
       // los movimientos sin offset (o) o sin festoneado (f), debajo del número
       if (marcas[num]) texto(marcas[num], x, y + 31, { alinear: 0.5, px: 10, color: COLOR.sinAjuste });
       if (clavesSel.has(num)) rombo(x, y - 16, 9, COLOR.claveSel);
@@ -213,7 +214,7 @@ export function crearHud(motor, { alMovimiento, alDeslizar, alBoton, alMenu }) {
   return {
     /**
      * Qué mostrar: { linea: { titulo, nums, actual, claves: Set, clavesSel: Set },
-     *   (linea.marcas?: { num: texto } debajo de cada número)
+     *   (linea.marcas?: { num: texto } debajo de cada número; linea.extra?: Set de las curvas adicionales)
      *   deslizadores: [{ id, titulo, min, max, paso, valor, unidad, fila?, apagado? }],
      *   botones?: [{ id, texto, leyenda?, activo? }] }
      */

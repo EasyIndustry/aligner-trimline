@@ -15,7 +15,9 @@ Todos reciben lo mismo, ya resuelto y sin depender de cómo se dibujó:
       },
     }
 
-(más "datos": lo que dice el nombre de los STL, ver nombres.interpretar) y devuelven una lista
+(más "datos": lo que dice el nombre de los STL, ver nombres.interpretar, y "adicionales": las
+curvas adicionales [{maxilar, num: "X18", origen: "18", curva, controladores, ...}], que van en
+archivos aparte y no entran en el .pts ni en el PC) y devuelven una lista
 de archivos [{"nombre": str, "texto": str, "codificacion"?: str}] (sin codificación: UTF-8).
 Para sumar un formato:
 un módulo nuevo con una función decorada con @exportador, e importarlo al final de este archivo.

@@ -115,9 +115,34 @@ function ponerAjuste(maxilar, nums, campo, lleva) {
   pintarPanel();
   if (maxilar === estado.maxilar) resolverTodo();
 }
-const actual = () => (estado.maxilar ? estado.maxilares[estado.maxilar] : null);
+// Curvas ADICIONALES: una curva de más sobre la malla de un movimiento (su origen), con sus
+// propios puntos y deslizadores. Se llaman X + el origen (X18), van al final de la línea de
+// tiempo y se exportan solas, en su archivo.
+const esAdicional = (num) => typeof num === 'string' && num.startsWith('X');
+/** Las adicionales del maxilar cuyo origen está elegido: [{ num, origen, malla }]. */
+function adicionales(maxilar) {
+  const movs = movimientos(maxilar);
+  return Object.entries(estado.maxilares[maxilar]?.adicionales ?? {})
+    .map(([num, ad]) => ({ num, origen: ad.origen, malla: movs.find((m) => m.num === ad.origen)?.malla }))
+    .filter((a) => a.malla)
+    .sort((a, b) => a.origen.localeCompare(b.origen, undefined, { numeric: true }));
+}
+/** Lo que muestra la línea de tiempo: los movimientos y, al final, las adicionales. */
+const numsLinea = (maxilar) => [...movimientos(maxilar), ...adicionales(maxilar)];
+/** Lo que se edita: el maxilar, o la adicional si se está mirando una. */
+const actual = () => {
+  if (!estado.maxilar) return null;
+  const max = estado.maxilares[estado.maxilar];
+  return esAdicional(estado.num) ? max.adicionales?.[estado.num] ?? null : max;
+};
+/** Los números donde viven los keyframes de lo que se edita. */
+const numsEditables = () => (esAdicional(estado.num) ? [estado.num] : movimientos(estado.maxilar).map((m) => m.num));
 /** El maxilar como lo entiende el servidor. */
 const paraServidor = (maxilar) => ({ ...estado.maxilares[maxilar], movimientos: movimientos(maxilar) });
+/** Una adicional como un maxilar de un solo movimiento, sobre la malla de su origen. */
+const paraServidorAd = (maxilar, num) => ({
+  ...estado.maxilares[maxilar].adicionales[num], movimientos: adicionales(maxilar).filter((a) => a.num === num).map(({ num: n, malla }) => ({ num: n, malla })),
+});
 
 // ---------- carga de modelos ----------
 // Los modelos los lee siempre el servidor desde el disco: así el proyecto anota la ruta completa
@@ -208,7 +233,7 @@ function separacion(clave) {
 function alCambiarArchivos() {
   const hay = Object.keys(MAXILARES).filter((m) => movimientos(m).length);
   if (!estado.maxilar || !hay.includes(estado.maxilar)) elegirMaxilar(hay[0] ?? null, true);
-  else if (!movimientos(estado.maxilar).some((m) => m.num === estado.num)) irA(base(estado.maxilar));
+  else if (!numsLinea(estado.maxilar).some((m) => m.num === estado.num)) irA(base(estado.maxilar));
   pintarPanel();
   resolverTodo();
 }
@@ -238,7 +263,7 @@ function irA(num) {
 }
 
 function mostrar() {
-  const mov = estado.maxilar ? movimientos(estado.maxilar).find((m) => m.num === estado.num) : null;
+  const mov = estado.maxilar ? numsLinea(estado.maxilar).find((m) => m.num === estado.num) : null;
   visor.mostrar(mov?.malla ?? null);
   visor.dibujar(mov ? curvas[estado.maxilar][estado.num] ?? null : null, estado.seleccion, estado.elegidos);
   visor.referencia(mov ? referencias[`${estado.maxilar}|${estado.num}`] ?? null : null);
@@ -251,6 +276,7 @@ let turno = 0, espera = 0;
 function resolverTodo({ soloActual = false } = {}) {
   const maxilar = estado.maxilar;
   if (!maxilar || !estado.num) return;
+  if (esAdicional(estado.num) && !adicionales(maxilar).some((a) => a.num === estado.num)) return;
   const cuerpo = paraServidor(maxilar);
   const mio = ++turno;
   const recibir = (r) => {
@@ -260,12 +286,15 @@ function resolverTodo({ soloActual = false } = {}) {
     if (maxilar === estado.maxilar && !arrastre) mostrar();
     else if (maxilar === estado.maxilar) visor.dibujar(curvas[maxilar][estado.num] ?? null, estado.seleccion, estado.elegidos);
   };
-  api.resolver(cuerpo, [estado.num]).then(recibir).catch((e) => avisar(e.message, true));
+  const ya = esAdicional(estado.num) ? paraServidorAd(maxilar, estado.num) : cuerpo;
+  api.resolver(ya, [estado.num]).then(recibir).catch((e) => avisar(e.message, true));
   clearTimeout(espera);
   if (soloActual) return;
   espera = setTimeout(() => {
     if (mio !== turno) return;
-    api.resolver(cuerpo, null).then((r) => { if (mio === turno) recibir(r); }).catch((e) => avisar(e.message, true));
+    const todo = (c) => api.resolver(c, null).then((r) => { if (mio === turno) recibir(r); }).catch((e) => avisar(e.message, true));
+    todo(cuerpo);
+    for (const a of adicionales(maxilar)) if (estado.maxilares[maxilar].adicionales[a.num].controladores.length) todo(paraServidorAd(maxilar, a.num));
   }, 120);
 }
 
@@ -289,6 +318,7 @@ function viajar(desde, hacia, texto) {
   if (!desde.length) { avisar(`No hay nada para ${texto}.`); return; }
   hacia.push(ahora);
   estado.maxilares = JSON.parse(/** @type {string} */ (desde.pop()));
+  if (esAdicional(estado.num) && !actual()) estado.num = base(estado.maxilar);
   const max = actual();
   const ids = new Set(max?.controladores.map((c) => c.id) ?? []);
   if (estado.seleccion && !esInversa(estado.seleccion) && !ids.has(estado.seleccion)) estado.seleccion = null;
@@ -298,6 +328,53 @@ function viajar(desde, hacia, texto) {
 }
 const deshacer = () => viajar(historial.atras, historial.adelante, 'deshacer');
 const rehacer = () => viajar(historial.adelante, historial.atras, 'rehacer');
+
+// ---------- curvas adicionales ----------
+/**
+ * Crea la adicional X<origen>: arranca como copia de ese movimiento (los puntos donde están ahí,
+ * los mismos ajustes) y desde ahí se ajusta sola. Si ya existe, va a ella.
+ */
+async function crearAdicional(origen) {
+  const maxilar = estado.maxilar;
+  if (!maxilar || esAdicional(origen)) return;
+  const max = estado.maxilares[maxilar], num = `X${origen}`;
+  if (max.adicionales?.[num]) { irA(num); return; }
+  try {
+    // las posiciones de los puntos en el origen (con sus keyframes interpolados, sobre la malla)
+    const r = curvas[maxilar][origen] ?? (await api.resolver(paraServidor(maxilar), [origen])).movimientos[origen];
+    const pos = Object.fromEntries(r.controladores.map((c) => [c.id, c.pos]));
+    const sin = sinAjusteDe(maxilar, origen);
+    const copia = JSON.parse(JSON.stringify(max));
+    recordar();
+    max.adicionales = {
+      ...max.adicionales,
+      [num]: {
+        origen, offset: copia.offset, amplitud: copia.amplitud, ancho: copia.ancho, inversas: copia.inversas ?? {},
+        ...(copia.lingual ? { lingual: copia.lingual } : {}),
+        controladores: copia.controladores.filter((c) => pos[c.id]).map((c) => ({
+          ...c, claves: { [num]: pos[c.id] },
+          // si el origen iba sin offset o sin festoneado, la copia también (en sus puntos)
+          ...(sin.offset === false ? { offset: false } : {}), ...(sin.festoneado === false ? { festoneado: false } : {}),
+        })),
+      },
+    };
+    irA(num);
+    pintarPanel(); resolverTodo();
+    avisar(`Curva adicional ${num}: copia del ${origen}. Ajustala acá; se exporta sola, en su archivo.`);
+  } catch (e) { avisar(e.message, true); }
+}
+
+function borrarAdicional(num) {
+  const max = estado.maxilar ? estado.maxilares[estado.maxilar] : null;
+  if (!max?.adicionales?.[num] || !confirm(`¿Borrar la curva adicional ${num}?`)) return;
+  recordar();
+  const origen = max.adicionales[num].origen;
+  const { [num]: _, ...resto } = max.adicionales;
+  if (Object.keys(resto).length) max.adicionales = resto; else delete max.adicionales;
+  delete curvas[estado.maxilar][num];
+  if (estado.num === num) { estado.seleccion = null; estado.elegidos = new Set(); irA(movimientos(estado.maxilar).some((m) => m.num === origen) ? origen : base(estado.maxilar)); }
+  pintarPanel(); resolverTodo();
+}
 
 // ---------- gestos sobre el visor ----------
 let arrastre = /** @type {{ id: string, movio: boolean, antes?: string, manija?: { lado: string, clave: number[], pos: number[] }, inversa?: { clave: string, desde: number[], previo: number[] } } | null} */ (null);
@@ -368,7 +445,7 @@ visor.lienzo.addEventListener('pointerdown', (ev) => {
   }
   const golpe = visor.picar(x, y);
   if (!golpe) return;
-  if (estado.num !== base(estado.maxilar)) {
+  if (!esAdicional(estado.num) && estado.num !== base(estado.maxilar)) {
     avisar(`Los puntos se marcan en el primer movimiento (${base(estado.maxilar)}). Acá se mueven los que ya están.`, true);
     return;
   }
@@ -488,8 +565,15 @@ function abrirMenuMov(num, ev, arriba = false) {
 function cerrarMenuMov() { menuMov.hidden = true; menuNum = null; }
 function pintarMenuMov() {
   if (!menuNum || !estado.maxilar) return;
+  const ad = esAdicional(menuNum);
+  for (const e of /** @type {NodeListOf<HTMLElement>} */ (menuMov.querySelectorAll('.solo-mov'))) e.hidden = ad;
+  /** @type {HTMLElement} */ ($('menu-borrar-adicional')).hidden = !ad;
+  const crear = /** @type {HTMLButtonElement} */ ($('menu-adicional'));
+  crear.hidden = ad;
+  crear.textContent = estado.maxilares[estado.maxilar].adicionales?.[`X${menuNum}`] ? `Ir a la curva adicional X${menuNum}` : `Crear curva adicional (X${menuNum})`;
   const s = sinAjusteDe(estado.maxilar, menuNum);
-  /** @type {HTMLElement} */ (menuMov.querySelector('.titulo-menu')).textContent = `${MAXILARES[estado.maxilar]} · movimiento ${menuNum}`;
+  /** @type {HTMLElement} */ (menuMov.querySelector('.titulo-menu')).textContent = ad
+    ? `${MAXILARES[estado.maxilar]} · curva adicional ${menuNum}` : `${MAXILARES[estado.maxilar]} · movimiento ${menuNum}`;
   for (const caja of /** @type {NodeListOf<HTMLInputElement>} */ (menuMov.querySelectorAll('input[data-campo]'))) {
     caja.checked = s[/** @type {string} */ (caja.dataset.campo)] !== false;
   }
@@ -497,8 +581,10 @@ function pintarMenuMov() {
   const despues = nums.slice(nums.indexOf(menuNum) + 1);
   const hasta = /** @type {HTMLSelectElement} */ ($('menu-hasta'));
   hasta.replaceChildren(new Option('—', ''), ...despues.map((n) => new Option(n, n)));
-  /** @type {HTMLElement} */ (hasta.closest('label')).hidden = !despues.length;
+  /** @type {HTMLElement} */ (hasta.closest('label')).hidden = !despues.length || ad;
 }
+$('menu-adicional').addEventListener('click', () => { const num = menuNum; cerrarMenuMov(); if (num) crearAdicional(num); });
+$('menu-borrar-adicional').addEventListener('click', () => { const num = menuNum; cerrarMenuMov(); if (num) borrarAdicional(num); });
 $('visor').addEventListener('pointerdown', (ev) => {
   menuRecienCerrado = null;
   if (!menuMov.hidden && !menuMov.contains(/** @type {Node} */ (ev.target))) { menuRecienCerrado = menuNum; cerrarMenuMov(); }
@@ -599,7 +685,7 @@ function quitarClave() {
   const c = max?.controladores.find((k) => k.id === estado.seleccion);
   if (!c || !estado.num) return;
   if (!c.claves[estado.num]) { avisar('Ese punto no tiene keyframe en este movimiento.'); return; }
-  if (Object.keys(c.claves).filter((k) => movimientos(estado.maxilar).some((m) => m.num === k)).length <= 1) {
+  if (Object.keys(c.claves).filter((k) => numsEditables().includes(k)).length <= 1) {
     avisar('Es el único keyframe del punto: para sacarlo, borrá el punto.', true);
     return;
   }
@@ -619,7 +705,7 @@ window.addEventListener('keydown', (ev) => {
     return;
   }
   if (ctrl) return;
-  const nums = estado.maxilar ? movimientos(estado.maxilar).map((m) => m.num) : [];
+  const nums = estado.maxilar ? numsLinea(estado.maxilar).map((m) => m.num) : [];
   const i = nums.indexOf(estado.num ?? '');
   if (ev.key === 'ArrowRight' && i >= 0 && i < nums.length - 1) irA(nums[i + 1]);
   else if (ev.key === 'ArrowLeft' && i > 0) irA(nums[i - 1]);
@@ -640,8 +726,9 @@ function elegirModo(modo) { estado.modo = estado.modo === modo ? null : modo; pi
 function pintarHud() {
   const max = actual();
   if (!max || !estado.maxilar) { hud.definir(null); pintarProyecto(); return; }
-  const nums = movimientos(estado.maxilar).map((m) => m.num);
+  const nums = numsLinea(estado.maxilar).map((m) => m.num);
   const claves = new Set(max.controladores.flatMap((c) => Object.keys(c.claves)));
+  const ad = esAdicional(estado.num) ? max : null;
   const sel = max.controladores.find((c) => c.id === estado.seleccion);
   // los movimientos que van sin offset (o) o sin festoneado (f)
   const marcas = Object.fromEntries(nums.map((n) => {
@@ -653,8 +740,10 @@ function pintarHud() {
   const apagado = (id) => (id === 'offset' && aca.offset === false) || (id === 'amplitud' && aca.festoneado === false);
   hud.definir({
     linea: {
-      titulo: `${MAXILARES[estado.maxilar]} · movimiento ${estado.num}${estado.num === nums[0] ? ' (base)' : ''}${sinAca.length ? ` · sin ${sinAca.join(' ni ')}` : ''}`,
+      titulo: ad ? `${MAXILARES[estado.maxilar]} · curva adicional ${estado.num} (sobre el ${ad.origen}, se exporta aparte)`
+        : `${MAXILARES[estado.maxilar]} · movimiento ${estado.num}${estado.num === nums[0] ? ' (base)' : ''}${sinAca.length ? ` · sin ${sinAca.join(' ni ')}` : ''}`,
       nums, actual: estado.num, claves, clavesSel: new Set(sel ? Object.keys(sel.claves) : []), marcas,
+      extra: new Set(nums.filter(esAdicional)),
     },
     deslizadores: max.lingual
       ? [...DESLIZADORES.map((d) => ({ ...d, titulo: `${d.titulo} V`, valor: max[d.id], fila: 1, apagado: apagado(d.id) })),
@@ -703,7 +792,7 @@ function pintarPanel() {
     : 'Cargá los modelos para empezar.';
   /** @type {HTMLButtonElement} */ ($('borrar-punto')).disabled = !estado.seleccion;
   const sel = max?.controladores.find((c) => c.id === estado.seleccion);
-  /** @type {HTMLButtonElement} */ ($('borrar-clave')).disabled = !(sel && estado.num && sel.claves[estado.num] && estado.num !== base(estado.maxilar));
+  /** @type {HTMLButtonElement} */ ($('borrar-clave')).disabled = !(sel && estado.num && sel.claves[estado.num] && estado.num !== base(estado.maxilar) && !esAdicional(estado.num));
   const inversa = esInversa(estado.seleccion) ? max?.inversas?.[estado.seleccion.slice(2)] : null;
   /** @type {HTMLButtonElement} */ ($('restablecer')).disabled = !(sel?.manijas || inversa);
   // las casillas muestran a los elegidos: tildada si todos siguen, a medias si algunos
@@ -1260,7 +1349,7 @@ async function aplicarTrabajo({ trabajo: t, mallas, faltan }, nombre) {
   alCambiarArchivos();
   if (t.vista?.maxilar && movimientos(t.vista.maxilar).length) {
     if (t.vista.maxilar !== estado.maxilar) elegirMaxilar(t.vista.maxilar, true);
-    irA(movimientos(t.vista.maxilar).some((m) => m.num === t.vista.num) ? t.vista.num : base(t.vista.maxilar));
+    irA(numsLinea(t.vista.maxilar).some((m) => m.num === t.vista.num) ? t.vista.num : base(t.vista.maxilar));
   }
   if (pendientes.length) {
     const donde = [...new Set(pendientes.map((p) => p.ruta?.replace(/[\\/][^\\/]*$/, '')).filter(Boolean))];

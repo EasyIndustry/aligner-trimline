@@ -15,6 +15,9 @@ Copia el de los casos que ya se cortan (`BN595.pts`, `BN595 PC.pts` y los datos 
 
 pts-por-curva es lo mismo con una curva por archivo, con el nombre del modelo de ese movimiento
 (`BZ254-L22-A-solido.stl` → `BZ254-L22-A-solido.pts`); sin modelo, `<ID>_<maxilar>_<mov>.pts`.
+
+Las curvas adicionales (`X18`: una copia del 18 ajustada aparte) van SOLO en su propio archivo,
+`<ID> <maxilar> X18.pts`: con su encabezado en el formato pts, sin él en pts-por-curva.
 """
 from __future__ import annotations
 
@@ -71,6 +74,12 @@ def _control(trabajo: dict, o: dict) -> dict:
     return {"nombre": f"{trabajo['id']}{o['sufijo_pc']}.pts", "texto": "".join(bloques)}
 
 
+def _adicionales(trabajo: dict, o: dict, encabezado: bool) -> list[dict]:
+    return [{"nombre": f"{trabajo['id']} {a['maxilar']} {a['num']}.pts",
+             "texto": _bloque(f"{a['maxilar']} {a['num']}" if encabezado else None, a["curva"], o["decimales"], o["salto"])}
+            for a in trabajo.get("adicionales", []) if len(a["curva"])]
+
+
 def _datos(trabajo: dict) -> dict:
     d = trabajo.get("datos") or {}
     nombre = " ".join(x for x in (d.get("paciente"), d.get("etapa")) if x)
@@ -85,7 +94,7 @@ def un_archivo(trabajo: dict, o: dict) -> list[dict]:
         _bloque(f"{maxilar} {m['num']}", m["curva"], o["decimales"], o["salto"])
         for maxilar, movs in _maxilares(trabajo) for m in movs if len(m["curva"])
     )
-    return [{"nombre": f"{trabajo['id']}.pts", "texto": texto}, _control(trabajo, o), _datos(trabajo)]
+    return [{"nombre": f"{trabajo['id']}.pts", "texto": texto}, _control(trabajo, o), _datos(trabajo), *_adicionales(trabajo, o, True)]
 
 
 @exportador("pts-por-curva", "PTS (un archivo por maxilar y movimiento)", OPCIONES)
@@ -95,4 +104,4 @@ def por_curva(trabajo: dict, o: dict) -> list[dict]:
          "texto": _bloque(None, m["curva"], o["decimales"], o["salto"])}
         for maxilar, movs in _maxilares(trabajo) for m in movs if len(m["curva"])
     ]
-    return archivos + [_control(trabajo, o), _datos(trabajo)]
+    return archivos + [_control(trabajo, o), _datos(trabajo)] + _adicionales(trabajo, o, False)

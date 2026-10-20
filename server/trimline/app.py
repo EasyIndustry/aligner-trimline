@@ -294,20 +294,25 @@ def exportar_trabajo(cuerpo: dict) -> dict:
             con_clave = set(proyecto.con_keyframe(maxilar))
             if "datos" not in trabajo:
                 trabajo["datos"] = nombres.interpretar(mallas.obtener(maxilar["movimientos"][0]["malla"]).nombre)
-            movs = []
-            for m in maxilar["movimientos"]:
-                r = proyecto.resolver(maxilar, m["num"], n=int(n) if n else None, paso=float(paso) if paso else None)
+            def resuelta(mx: dict, m: dict) -> dict:
+                r = proyecto.resolver(mx, m["num"], n=int(n) if n else None, paso=float(paso) if paso else None)
                 if not r["cerrada"]:
                     raise ValueError(f"{clave} {m['num']}: la curva no está cerrada (faltan vestibulares, linguales o los dos extremos)")
                 orden = {c["id"]: c for c in r["controladores"]}
                 t = r["tramos"][0]
                 frente = mallas.obtener(m["malla"]).mas_cercano(curva.desde_el_frente(t["puntos"], t["claves"], t["info"]))
-                movs.append({
+                return {
                     "num": m["num"], "cerrada": True, "curva": frente, "modelo": mallas.obtener(m["malla"]).nombre,
-                    "controladores": [orden[i["id"]] for i in r["tramos"][0]["info"] if i["clase"] == "cresta"],
+                    "controladores": [orden[i["id"]] for i in t["info"] if i["clase"] == "cresta"],
                     "tiene_clave": m["num"] in con_clave,
-                })
-            trabajo["maxilares"][clave] = movs
+                }
+            trabajo["maxilares"][clave] = [resuelta(maxilar, m) for m in maxilar["movimientos"]]
+            # las curvas adicionales: cada una sobre la malla de su origen, y van aparte
+            for num, ad in sorted((maxilar.get("adicionales") or {}).items()):
+                if not ad.get("controladores"):
+                    continue
+                mx = proyecto.adicional(maxilar, num)
+                trabajo.setdefault("adicionales", []).append({**resuelta(mx, mx["movimientos"][0]), "maxilar": clave, "origen": ad.get("origen")})
         if not trabajo["maxilares"]:
             raise ValueError("no hay ninguna curva para exportar")
         archivos = exportar(cuerpo.get("formato") or "pts", trabajo, cuerpo.get("opciones"))

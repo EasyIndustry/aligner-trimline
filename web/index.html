@@ -32,10 +32,12 @@
     <button id="mostrar-panel" type="button" title="Mostrar el panel" hidden>‹</button>
     <div id="menu-mov" role="menu" hidden>
       <div class="titulo-menu"></div>
-      <label><input type="checkbox" data-campo="offset" /> Lleva offset</label>
-      <label><input type="checkbox" data-campo="festoneado" /> Lleva festoneado</label>
-      <label class="hasta">Igual hasta el <select id="menu-hasta"></select></label>
-      <p class="nota">Los puntos no cambian: solo este movimiento va sin lo destildado.</p>
+      <label class="solo-mov"><input type="checkbox" data-campo="offset" /> Lleva offset</label>
+      <label class="solo-mov"><input type="checkbox" data-campo="festoneado" /> Lleva festoneado</label>
+      <label class="hasta solo-mov">Igual hasta el <select id="menu-hasta"></select></label>
+      <p class="nota solo-mov">Los puntos no cambian: solo este movimiento va sin lo destildado.</p>
+      <button id="menu-adicional" type="button" title="Una curva más sobre este modelo, que arranca igual y se ajusta por separado. Se exporta sola, en su archivo"></button>
+      <button id="menu-borrar-adicional" type="button" hidden>Borrar esta curva adicional</button>
     </div>
     <div id="vacio" hidden>
       <p>No hay ningún proyecto abierto.</p>
@@ -167,6 +169,7 @@
           <button id="elegir-carpeta" type="button">Elegir carpeta…</button>
           <button id="exportar" class="principal" type="button" title="Los .pts para la máquina, en la carpeta elegida">Exportar</button>
         </div>
+        <p class="nota">Las curvas adicionales (X18…) salen cada una en su archivo, <code>&lt;ID&gt; &lt;maxilar&gt; X18.pts</code>, y no entran en el .pts ni en el PC.</p>
       </section>
 
       <section data-paso="programa" data-titulo="Ayuda y versiones">
@@ -178,7 +181,7 @@
         </div>
         <div id="versiones"></div>
         <h2>Mouse y teclado</h2>
-        <p class="ayuda">Clic izquierdo: marcar (con un modo prendido) y mover puntos, también los intermedios; con un punto elegido, arrastrar sus manijas ajusta ese festón.<br />Shift + arrastrar con el izquierdo: elegir varios puntos.<br />Clic derecho: orbitar.<br />Shift + clic derecho: desplazar.<br />Rueda: zoom.<br />← →: cambiar de movimiento.<br />⋯ arriba del cursor de la línea de tiempo, o clic derecho sobre un movimiento: si lleva offset y festoneado (o / f marca los que no).<br />1, 2, 3: prender o apagar un modo; Esc: apagarlo.<br />Ctrl+Z / Ctrl+Y: deshacer y rehacer. Ctrl+S: guardar.</p>
+        <p class="ayuda">Clic izquierdo: marcar (con un modo prendido) y mover puntos, también los intermedios; con un punto elegido, arrastrar sus manijas ajusta ese festón.<br />Shift + arrastrar con el izquierdo: elegir varios puntos.<br />Clic derecho: orbitar.<br />Shift + clic derecho: desplazar.<br />Rueda: zoom.<br />← →: cambiar de movimiento.<br />⋯ arriba del cursor de la línea de tiempo, o clic derecho sobre un movimiento: si lleva offset y festoneado (o / f marca los que no), y crear una curva adicional (X18) sobre ese modelo.<br />1, 2, 3: prender o apagar un modo; Esc: apagarlo.<br />Ctrl+Z / Ctrl+Y: deshacer y rehacer. Ctrl+S: guardar.</p>
       </section>
     </div>
 

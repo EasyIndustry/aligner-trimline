@@ -221,3 +221,28 @@ def test_avisa_si_el_codigo_cambio(monkeypatch):
     assert cliente.get("/api/version").json()["reiniciar"] is False
     monkeypatch.setattr(modulo, "_HUELLA", "otra")
     assert cliente.get("/api/version").json()["reiniciar"] is True
+
+
+def test_curva_adicional_sale_aparte(domo_stl, tmp_path):
+    m = cliente.post("/api/mallas", params={"nombre": "BN596 Caso Prueba 2.0 BIS Sup 01 CNC3.stl"}, content=domo_stl).json()
+    copia = [{**c, "claves": {"X01": c["claves"]["01"]}} for c in anillo(num="01")]
+    maxilar = {"movimientos": [{"num": "01", "malla": m["id"]}], "controladores": anillo(num="01"),
+               "adicionales": {"X01": {"origen": "01", "offset": 1.0, "amplitud": 0.0, "controladores": copia}}}
+    r = cliente.post("/api/exportar", json={"id": "BN596", "maxilares": {"sup": maxilar}, "carpeta": str(tmp_path)})
+    assert r.status_code == 200, r.text
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["BN596 PC.pts", "BN596 sup X01.pts", "BN596.curva", "BN596.pts"]
+    # la adicional va solo en su archivo: ni en el .pts ni en el PC
+    assert b"X01" not in (tmp_path / "BN596.pts").read_bytes() and b"X01" not in (tmp_path / "BN596 PC.pts").read_bytes()
+    extra = (tmp_path / "BN596 sup X01.pts").read_bytes()
+    assert extra.startswith(b"sup X01\r\n") and extra.count(b"\r\n") == 301
+    # con su offset es otra curva que la del 01
+    assert extra.split(b"\r\n", 1)[1] != (tmp_path / "BN596.pts").read_bytes().split(b"\r\n", 1)[1]
+    # se resuelve como un maxilar de un movimiento
+    from trimline import proyecto
+    ad = proyecto.adicional(maxilar, "X01")
+    assert ad["movimientos"] == [{"num": "X01", "malla": m["id"]}]
+    assert cliente.post("/api/resolver", json={"maxilar": ad}).json()["movimientos"]["X01"]["cerrada"]
+    # sin el movimiento de origen, error claro
+    sin = {**maxilar, "adicionales": {"X09": {"origen": "09", "controladores": copia}}}
+    r = cliente.post("/api/exportar", json={"id": "BN596", "maxilares": {"sup": sin}, "carpeta": str(tmp_path), "pisar": True})
+    assert r.status_code == 422 and "09" in r.json()["detail"]

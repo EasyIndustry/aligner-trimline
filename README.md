@@ -40,8 +40,12 @@ instala con `AlignerTrimlineSetup-<versión>.exe`, que sale de cada release.
    (o clic derecho sobre el movimiento, o las columnas Off. y Fest. de Modelos): ese movimiento va sin eso, en corte seco, y los
    puntos de control no cambian. "Igual hasta el…" lo copia a los siguientes. En la línea de
    tiempo queda marcado con o / f.
+   **Curva adicional:** en el ⋯ de un movimiento, "Crear curva adicional (X18)". Es una curva de
+   más sobre ese mismo modelo (por maxilar): arranca igual al 18 y se ajusta por separado
+   (puntos, offset, festoneado), sin tocar el 18. Va al final de la línea de tiempo, en verde.
 6. **Exportar.** `<ID>.pts` con todas las curvas, `<ID> PC.pts` con los puntos de control y
    `<ID>.curva` con los datos del caso (un JSON), igual que los que ya consume el generador del KUKA.
+   Cada curva adicional sale sola, en `<ID> <maxilar> X18.pts` (no entra en los otros dos).
    Los escribe el programa en la carpeta elegida ("Elegir carpeta…" abre el diálogo del
    sistema; si ya hay archivos con ese nombre, pregunta antes de reemplazarlos).
 7. **Guardar.** Mientras trabajás se escribe solo un respaldo, `<ID>.trimline.bak`, en la
