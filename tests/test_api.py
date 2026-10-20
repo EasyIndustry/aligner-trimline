@@ -149,6 +149,7 @@ def test_modelos_arrastrados_se_encuentran_junto_al_trimline(domo_stl, tmp_path)
     destino = tmp_path / "0046.trimline"
     r = cliente.post("/api/trabajo/guardar-en", json={"trabajo": trabajo, "ruta": str(destino)}).json()
     assert r["ruta"] == str(destino) and r["sin_ruta"] == []
+    assert r["rutas"] == {m["id"]: str((tmp_path / nombre).resolve())}
     import json
     assert json.loads(destino.read_text())["archivos"][0]["ruta"] == str((tmp_path / nombre).resolve())
 
@@ -171,3 +172,38 @@ def test_curva_de_referencia():
     r = cliente.post("/api/referencia", params={"nombre": "cualquiera.pts"}, content=suelta).json()
     assert r["curvas"][0]["maxilar"] is None                 # sin nombre que lo diga: el que se mira
     assert cliente.post("/api/referencia", params={"nombre": "x.pts"}, content="hola").status_code == 422
+
+
+def test_proyecto_nuevo_no_pisa_y_suelta_las_mallas(domo_stl, tmp_path):
+    from trimline import mallas
+    m = cliente.post("/api/mallas", params={"nombre": "0047 Caso Prueba 1.0 sup 00.stl"}, content=domo_stl).json()
+    otra = cliente.post("/api/mallas", params={"nombre": "x.stl"}, content=b"otra" + domo_stl[4:]).json()  # otro encabezado: otra malla
+    trabajo = {"id": "0047", "archivos": [{"malla": m["id"], "nombre": "0047 Caso Prueba 1.0 sup 00.stl", "maxilar": "sup", "mov": "00", "usar": True}]}
+    destino = tmp_path / "0047.trimline"
+    assert cliente.post("/api/trabajo/guardar-en", json={"trabajo": trabajo, "ruta": str(destino), "no_pisar": True}).status_code == 200
+    antes = destino.read_bytes()
+    r = cliente.post("/api/trabajo/guardar-en", json={"trabajo": {**trabajo, "id": "otro"}, "ruta": str(destino), "no_pisar": True})
+    assert r.status_code == 409 and destino.read_bytes() == antes
+    # Guardar (sin no_pisar) sí reescribe
+    assert cliente.post("/api/trabajo/guardar-en", json={"trabajo": trabajo, "ruta": str(destino)}).status_code == 200
+
+    assert cliente.post("/api/mallas/olvidar", json={"conservar": [m["id"]]}).json()["olvidadas"] >= 1
+    assert mallas.obtener(m["id"]) and cliente.get(f"/api/mallas/{otra['id']}/bin").status_code == 404
+
+
+def test_listar_los_modelos_de_una_carpeta(domo_stl, tmp_path):
+    (tmp_path / "b.stl").write_bytes(domo_stl)
+    (tmp_path / "a.STL").write_bytes(domo_stl)
+    (tmp_path / "notas.txt").write_text("x")
+    r = cliente.post("/api/mallas/carpeta", json={"carpeta": str(tmp_path), "listar": True}).json()
+    assert r["nombres"] == ["a.STL", "b.stl"]
+    uno = cliente.post("/api/mallas/carpeta", json={"carpeta": str(tmp_path), "nombres": ["b.stl"]}).json()
+    assert [m["nombre"] for m in uno["mallas"]] == ["b.stl"] and uno["mallas"][0]["ruta"] == str((tmp_path / "b.stl").resolve())
+
+
+def test_respaldo_sin_carpeta_va_a_los_datos(domo_stl, tmp_path, monkeypatch):
+    monkeypatch.setenv("TRIMLINE_HOME", str(tmp_path))
+    m = cliente.post("/api/mallas", params={"nombre": "0048 Caso Prueba 1.0 sup 00.stl"}, content=domo_stl).json()
+    trabajo = {"id": "0048", "archivos": [{"malla": m["id"], "nombre": "0048 Caso Prueba 1.0 sup 00.stl", "maxilar": "sup", "mov": "00", "usar": True}]}
+    r = cliente.post("/api/trabajo/guardar-en", json={"trabajo": trabajo, "respaldo": True, "nombre": "../0048.trimline.bak"}).json()
+    assert r["ruta"] == str(tmp_path / "respaldos" / "0048.trimline.bak") and Path(r["ruta"]).is_file()

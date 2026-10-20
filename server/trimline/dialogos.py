@@ -145,7 +145,7 @@ def elegir_carpeta(inicial: str | None = None, titulo: str = "Elegí la carpeta"
 
 
 def abrir_archivo(inicial: str | None, titulo: str, filtro: tuple[str, str]) -> str | None:
-    """Elegir un archivo existente. `filtro` = ("Descripción", "*.ext")."""
+    """Elegir un archivo existente. `filtro` = ("Descripción", "*.ext"), varios patrones con ";"."""
     return _elegir("abrir", titulo, inicial, filtro=filtro)
 
 
@@ -179,7 +179,7 @@ def _elegir(modo: str, titulo: str, inicial: str | None, nombre: str = "",
         if modo == "guardar":
             orden += ["--save", "--confirm-overwrite"]
         if filtro:
-            orden.append(f"--file-filter={filtro[0]} | {filtro[1]}")
+            orden.append(f"--file-filter={filtro[0]} | {filtro[1].replace(';', ' ')}")
         if inicial or nombre:
             orden.append(f"--filename={(inicial or '').rstrip('/')}/{nombre}")
         r = subprocess.run(orden, capture_output=True, text=True, check=False)  # noqa: S603
@@ -190,7 +190,7 @@ def _elegir(modo: str, titulo: str, inicial: str | None, nombre: str = "",
             orden = ["kdialog", "--title", titulo, "--getexistingdirectory", base]
         else:
             accion = "--getsavefilename" if modo == "guardar" else "--getopenfilename"
-            orden = ["kdialog", "--title", titulo, accion, os.path.join(base, nombre), filtro[1] if filtro else ""]
+            orden = ["kdialog", "--title", titulo, accion, os.path.join(base, nombre), filtro[1].replace(";", " ") if filtro else ""]
         r = subprocess.run(orden, capture_output=True, text=True, check=False)  # noqa: S603
         salida = r.stdout.strip()
     else:

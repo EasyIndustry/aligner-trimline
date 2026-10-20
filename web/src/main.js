@@ -33,10 +33,24 @@ const estado = {
 const esInversa = (id) => !!id?.startsWith('i:');
 /** Lo que resolvió el servidor: curvas[maxilar][num]. */
 const curvas = { sup: {}, inf: {} };
-/** Lo que traía un trabajo abierto, para reconocer sus modelos cuando se arrastren. */
+/** Los modelos de un trabajo abierto que no estaban en su ruta: se buscan en otra carpeta. */
 let pendientes = /** @type {any[]} */ ([]);
 /** Curvas de referencia importadas de un .pts, por 'maxilar|mov': [x, y, z, ...]. Solo se miran. */
 let referencias = /** @type {Record<string, number[]>} */ ({});
+// El archivo del proyecto. Ya guardado una vez, Guardar vuelve a escribir el mismo (si sigue
+// siendo el mismo caso); "Guardar como…" pregunta dónde.
+let rutaTrabajo = /** @type {string | null} */ (null);
+let idTrabajo = '';
+/** El nombre del último guardado o abierto (también sin ruta, si fue desde el navegador). */
+let nombreTrabajo = '';
+/** Cómo estaba el proyecto al guardarlo o abrirlo: si cambió, hay cambios sin guardar. */
+let firmaGuardada = '';
+/** El respaldo que se escribe solo (<ID>.trimline.bak): dónde y cómo estaba el proyecto. */
+let rutaRespaldo = /** @type {string | null} */ (null);
+let firmaRespaldo = '';
+/** Con qué se escribió el último respaldo (su ruta, o su nombre si lo ubica el servidor). */
+let claveRespaldo = '';
+let esperaRespaldo = 0;
 
 const visor = await crearVisor($('visor'));
 const hud = crearHud(visor.motor, { alMovimiento: irA, alDeslizar: deslizar, alBoton: (id) => { if (id === 'candado') candado(); } });
@@ -65,35 +79,29 @@ const actual = () => (estado.maxilar ? estado.maxilares[estado.maxilar] : null);
 const paraServidor = (maxilar) => ({ ...estado.maxilares[maxilar], movimientos: movimientos(maxilar) });
 
 // ---------- carga de modelos ----------
-async function cargarArchivos(lista) {
+// Los modelos los lee siempre el servidor desde el disco: así el proyecto anota la ruta completa
+// de cada uno. Se eligen al crear el proyecto (el asistente); después solo se buscan los que
+// faltan al abrir uno.
+
+/** Lo que se suelta sobre la página: los .pts de referencia. Los modelos van por Nuevo proyecto. */
+async function soltarArchivos(lista) {
   const pts = [...lista].filter((a) => /\.pts$/i.test(a.name));
   if (pts.length) await cargarReferencias(pts);
-  const archivos = [...lista].filter((a) => /\.(stl|ply|obj)$/i.test(a.name));
-  if (!archivos.length) return;
-  let hechos = 0;
-  for (const archivo of archivos) {
-    avisar(`Cargando ${++hechos} de ${archivos.length}: ${archivo.name}`);
-    try { await agregarMalla(await api.subirMalla(archivo)); } catch (e) { avisar(String(e.message ?? e), true); }
+  if ([...lista].some((a) => /\.(stl|ply|obj)$/i.test(a.name))) {
+    avisar('Los modelos se eligen desde su carpeta, para que el proyecto sepa dónde están: Trabajo → Nuevo proyecto.', true);
   }
-  finCarga();
 }
 
-/** Carga los modelos de una carpeta: el servidor los lee del disco y sabe dónde están (va al .trimline). */
-async function cargarCarpeta() {
-  const inicial = estado.archivos.find((a) => a.ruta)?.ruta?.replace(/[\\/][^\\/]*$/, '') || campoCarpeta.value.trim() || null;
+/** Los modelos que no estaban donde decía el proyecto, desde otra carpeta. */
+async function buscarFaltantes() {
   try {
-    const { carpeta } = await api.elegirCarpeta(inicial, 'Carpeta con los modelos');
+    const { carpeta } = await api.elegirCarpeta(carpetaDe(rutaTrabajo) ?? carpetaDe(estado.archivos.find((a) => a.ruta)?.ruta), 'Carpeta con los modelos que faltan');
     if (!carpeta) return;
-    avisar('Cargando modelos…');
-    const r = await api.mallasDeCarpeta(carpeta);
-    if (!r.mallas.length) { avisar(`No hay modelos (.stl, .ply, .obj) en ${carpeta}`, true); return; }
-    let hechos = 0;
-    for (const m of r.mallas) {
-      avisar(`Cargando ${++hechos} de ${r.mallas.length}: ${m.nombre}`);
-      await agregarMalla(m);
-    }
+    avisar('Buscando…');
+    const r = await api.mallasDeCarpeta(carpeta, pendientes.map((p) => p.nombre));
+    if (!r.mallas.length) { avisar(`En ${carpeta} no está ninguno de los que faltan.`, true); return; }
+    for (const m of r.mallas) await agregarMalla(m);
     finCarga();
-    if (r.errores.length) avisar(`No se pudieron leer: ${r.errores.join('; ')}`, true);
   } catch (e) { avisar(e.message, true); }
 }
 
@@ -491,6 +499,7 @@ function quitarClave() {
 
 window.addEventListener('keydown', (ev) => {
   const ctrl = ev.ctrlKey || ev.metaKey, tecla = ev.key.toLowerCase();
+  if (asistente.open) { if (ctrl && tecla === 's') ev.preventDefault(); return; }
   if (ctrl && tecla === 's') { ev.preventDefault(); guardar(ev.shiftKey); return; }
   if (/** @type {HTMLElement} */ (ev.target).matches('input, select, textarea')) return;
   if (ctrl && (tecla === 'z' || tecla === 'y')) {
@@ -519,7 +528,7 @@ function elegirModo(modo) { estado.modo = estado.modo === modo ? null : modo; pi
 // ---------- el HUD ----------
 function pintarHud() {
   const max = actual();
-  if (!max || !estado.maxilar) { hud.definir(null); return; }
+  if (!max || !estado.maxilar) { hud.definir(null); pintarProyecto(); return; }
   const nums = movimientos(estado.maxilar).map((m) => m.num);
   const claves = new Set(max.controladores.flatMap((c) => Object.keys(c.claves)));
   const sel = max.controladores.find((c) => c.id === estado.seleccion);
@@ -537,6 +546,7 @@ function pintarHud() {
       leyenda: max.lingual ? 'V ≠ L' : 'V = L',
     }],
   });
+  pintarProyecto();
 }
 
 // ---------- el panel ----------
@@ -582,6 +592,10 @@ function pintarPanel() {
     caja.checked = elegidos.length > 0 && siguen === elegidos.length;
     caja.indeterminate = siguen > 0 && siguen < elegidos.length;
   }
+  $('sin-modelos').hidden = estado.archivos.length > 0;
+  $('faltantes').hidden = !pendientes.length;
+  $('faltan-texto').textContent = pendientes.length
+    ? `Faltan ${pendientes.length} modelos (no estaban en su ruta): ${pendientes.map((p) => p.nombre).join(', ')}.` : '';
   pintarReferencias();
   pintarHud();
 }
@@ -687,16 +701,20 @@ function ponerOpacidad(v) {
 opacidad.addEventListener('input', () => { ponerOpacidad(Number(opacidad.value)); guardado('trimline.opacidad', opacidad.value); });
 ponerOpacidad(Number(guardado('trimline.opacidad')) || 1);
 
-const soltarEn = $('soltar');
-$('elegir').addEventListener('click', () => $('archivos').click());
-$('elegir-modelos').addEventListener('click', cargarCarpeta);
 $('elegir-referencia').addEventListener('click', () => $('archivo-referencia').click());
 $('archivo-referencia').addEventListener('change', (ev) => { const el = /** @type {HTMLInputElement} */ (ev.target); cargarReferencias([...(el.files ?? [])]); el.value = ''; });
 $('quitar-referencias').addEventListener('click', () => { referencias = {}; pintarPanel(); mostrar(); });
-$('archivos').addEventListener('change', (ev) => { const el = /** @type {HTMLInputElement} */ (ev.target); cargarArchivos(el.files ?? []); el.value = ''; });
-for (const tipo of ['dragenter', 'dragover']) document.addEventListener(tipo, (ev) => { ev.preventDefault(); soltarEn.classList.add('encima'); });
-for (const tipo of ['dragleave', 'drop']) document.addEventListener(tipo, (ev) => { ev.preventDefault(); soltarEn.classList.remove('encima'); });
-document.addEventListener('drop', (ev) => cargarArchivos(ev.dataTransfer?.files ?? []));
+$('buscar-faltantes').addEventListener('click', buscarFaltantes);
+for (const tipo of ['dragenter', 'dragover', 'dragleave']) document.addEventListener(tipo, (ev) => ev.preventDefault());
+document.addEventListener('drop', (ev) => {
+  ev.preventDefault();
+  $('asistente-soltar').classList.remove('encima');
+  // con el asistente abierto, lo que se suelta (en cualquier parte) son los modelos del proyecto nuevo
+  if (asistente.open) soltarEnAsistente(ev.dataTransfer?.files ?? []);
+  else soltarArchivos(ev.dataTransfer?.files ?? []);
+});
+document.addEventListener('dragover', () => $('asistente-soltar').classList.toggle('encima', asistente.open));
+document.addEventListener('dragleave', (ev) => { if (!ev.relatedTarget) $('asistente-soltar').classList.remove('encima'); });
 
 // ---------- exportar, guardar y abrir ----------
 /** Descarga común, para los navegadores que no dejan elegir dónde guardar. */
@@ -753,13 +771,251 @@ $('exportar').addEventListener('click', async () => {
   } catch (e) { avisar(e.message, true); }
 });
 
-// Guardar: una foto del trabajo en un .trimline. Las mallas no van: solo dónde está cada STL.
-// Lo escribe el servidor (sabe la carpeta: ahí busca los STL que se arrastraron). Ya guardado
-// una vez, Guardar vuelve a escribir el mismo archivo (si sigue siendo el mismo caso);
-// "Guardar como…" pregunta dónde.
-let rutaTrabajo = /** @type {string | null} */ (null);
-let idTrabajo = '';
+// Guardar: una foto del trabajo en un .trimline. Las mallas no van: solo la ruta de cada STL.
+// La primera vez, Guardar pregunta el nombre y dónde; después vuelve a escribir ese archivo (si
+// sigue siendo el mismo caso). Aparte, un respaldo se escribe solo (ver más abajo).
 const carpetaDe = (ruta) => ruta?.replace(/[\\/][^\\/]*$/, '') || null;
+const enCarpeta = (carpeta, nombre) => `${carpeta}${carpeta.includes('\\') ? '\\' : '/'}${nombre}`;
+const hayProyecto = () => estado.archivos.length > 0 || pendientes.length > 0;
+/** Lo que cuenta como cambio: el caso, los modelos elegidos y los maxilares (no la vista). */
+const firma = () => JSON.stringify({
+  id: idCaso(), archivos: estado.archivos.map(({ malla, maxilar, mov, usar }) => [malla, maxilar, mov, usar]), maxilares: estado.maxilares,
+});
+const hayCambios = () => hayProyecto() && firma() !== firmaGuardada;
+
+function marcarGuardado(ruta, nombre = ruta?.split(/[\\/]/).pop() ?? '') {
+  rutaTrabajo = ruta; idTrabajo = idCaso(); nombreTrabajo = nombre;
+  firmaGuardada = firma();
+  pintarProyecto();
+}
+
+/** Abajo del panel: qué proyecto es y si tiene cambios sin guardar. */
+function pintarProyecto() {
+  const e = $('nombre-proyecto');
+  const cambios = hayCambios();
+  e.textContent = !hayProyecto() ? 'Sin proyecto'
+    : nombreTrabajo ? `${cambios ? '● ' : ''}${nombreTrabajo}` : `${idCaso()} · sin guardar`;
+  e.title = [rutaTrabajo ?? nombreTrabajo, cambios ? 'Hay cambios sin guardar' : '', rutaRespaldo ? `Respaldo: ${rutaRespaldo}` : '']
+    .filter(Boolean).join('\n');
+  e.classList.toggle('cambios', cambios);
+  /** @type {HTMLButtonElement} */ ($('guardar')).disabled = !hayProyecto();
+  /** @type {HTMLButtonElement} */ ($('guardar-como')).disabled = !hayProyecto();
+  $('vacio').hidden = hayProyecto();
+  if (hayProyecto() && firma() !== firmaRespaldo) programarRespaldo();
+}
+
+/** Antes de cambiar de proyecto: true si se puede seguir (no hay cambios, o se descartan). */
+const descartarCambios = (que) => !hayCambios() || confirm(`El proyecto tiene cambios sin guardar. ¿Descartarlos y ${que}?`);
+
+/** Suelta las mallas que ya no usa el proyecto, en el visor y en el servidor. */
+function soltarMallasSobrantes(conservar = [...estado.archivos, ...pendientes].map((a) => a.malla)) {
+  visor.olvidar(conservar);
+  api.olvidarMallas(conservar).catch(() => {});
+}
+
+/** Empieza de cero. `conservar`: mallas ya leídas que van a ser del proyecto nuevo. */
+function nuevoProyecto(conservar = []) {
+  turno++;                                                    // las curvas que estén en camino no sirven
+  clearTimeout(esperaRespaldo);
+  Object.assign(estado, {
+    archivos: [], maxilares: { sup: nuevoMaxilar(), inf: nuevoMaxilar() }, maxilar: null, num: null, seleccion: null, elegidos: new Set(),
+  });
+  curvas.sup = {}; curvas.inf = {};
+  pendientes = []; referencias = {};
+  /** @type {HTMLInputElement} */ ($('caso')).value = '';
+  rutaTrabajo = null; idTrabajo = ''; nombreTrabajo = ''; firmaGuardada = '';
+  rutaRespaldo = null; firmaRespaldo = ''; claveRespaldo = '';
+  olvidarHistorial();
+  soltarMallasSobrantes(conservar);
+  mostrar(); pintarPanel();
+}
+
+// ---------- el respaldo ----------
+// <ID>.trimline.bak en la carpeta de los modelos: se escribe solo al crear el proyecto y un
+// momento después de cada cambio. No es guardar: el proyecto sigue "sin guardar" hasta que se
+// usa Guardar. Si algo se cierra mal, el .bak se puede abrir con Abrir…
+function programarRespaldo() {
+  clearTimeout(esperaRespaldo);
+  esperaRespaldo = setTimeout(respaldar, 2000);
+}
+async function respaldar() {
+  clearTimeout(esperaRespaldo);
+  if (!hayProyecto()) return;
+  // sin ningún modelo con carpeta conocida (se arrastraron), lo ubica el servidor en sus datos
+  const carpeta = carpetaDe(estado.archivos.find((a) => a.ruta)?.ruta);
+  const nombre = `${idCaso()}.trimline.bak`, ruta = carpeta ? enCarpeta(carpeta, nombre) : null, ahora = firma();
+  if (ahora === firmaRespaldo && (ruta ?? nombre) === claveRespaldo) return;
+  try {
+    const r = await api.guardarEn({ trabajo: datosTrabajo(), ruta, nombre, respaldo: true });
+    rutaRespaldo = r.ruta; claveRespaldo = ruta ?? nombre; firmaRespaldo = ahora;
+    pintarProyecto();
+  } catch (e) { avisar(`No se pudo escribir el respaldo ${ruta ?? nombre}: ${e.message}`, true); }
+}
+
+// ---------- el asistente de proyecto nuevo ----------
+// Se eligen las carpetas con los modelos, se tildan los que usa el caso y se crea el proyecto
+// solo con esos. El servidor los lee del disco: cada uno queda con su ruta completa.
+const asistente = /** @type {HTMLDialogElement} */ ($('asistente'));
+/** Lo que se leyó de las carpetas: resumen de la malla + { maxilar, mov, usar }. */
+let propuestos = /** @type {any[]} */ ([]);
+let carpetasElegidas = /** @type {string[]} */ ([]);
+/** Mientras se lee una carpeta: cuántos hay, cuántos van y cuál se está leyendo. */
+let leyendo = /** @type {{ total: number, hechos: number, nombre: string } | null} */ (null);
+/** Cada vez que se abre el asistente: una lectura de antes que siga en camino se descarta. */
+let vezAsistente = 0;
+const NOTA_ASISTENTE = $('asistente-nota').textContent;
+const campoCasoNuevo = /** @type {HTMLInputElement} */ ($('asistente-caso'));
+
+function notaAsistente(texto = NOTA_ASISTENTE, error = false) {
+  $('asistente-nota').textContent = texto;
+  $('asistente-nota').classList.toggle('error', error);
+}
+
+function abrirAsistente() {
+  if (!descartarCambios('empezar un proyecto nuevo')) return;
+  propuestos = []; carpetasElegidas = []; leyendo = null; vezAsistente++;
+  campoCasoNuevo.value = '';
+  notaAsistente();
+  pintarAsistente();
+  asistente.showModal();
+}
+
+async function elegirCarpetaAsistente() {
+  const inicial = carpetaDe(carpetasElegidas.at(-1) ? `${carpetasElegidas.at(-1)}/x` : estado.archivos.find((a) => a.ruta)?.ruta);
+  try {
+    const { carpeta } = await api.elegirCarpeta(inicial, 'Carpeta con los modelos del caso');
+    if (!carpeta) return;
+    const vez = vezAsistente;
+    const { nombres } = await api.modelosDeCarpeta(carpeta);
+    if (!carpetasElegidas.includes(carpeta)) carpetasElegidas.push(carpeta);
+    await leerModelos(nombres, nombres, (nombre) => api.mallasDeCarpeta(carpeta, [nombre]), vez);
+    if (!nombres.length) notaAsistente(`No hay modelos (.stl, .ply, .obj) en ${carpeta}.`, true);
+  } catch (e) { notaAsistente(e.message, true); leyendo = null; pintarAsistente(); }
+}
+
+/** Los arrastrados (o elegidos con el selector del navegador): se suben y quedan sin ruta. */
+async function soltarEnAsistente(lista) {
+  const archivos = [...lista].filter((a) => /\.(stl|ply|obj)$/i.test(a.name));
+  if (!archivos.length) { notaAsistente('Ahí no hay modelos (.stl, .ply, .obj).', true); return; }
+  if (leyendo) return;
+  const subir = async (archivo) => {
+    try { return { mallas: [await api.subirMalla(archivo)], errores: [] }; } catch (e) { return { mallas: [], errores: [`${archivo.name}: ${e.message}`] }; }
+  };
+  await leerModelos(archivos, archivos.map((a) => a.name), subir, vezAsistente);
+}
+
+/**
+ * Lee los modelos de a uno, para mostrar cuál se está leyendo (un STL grande tarda unos
+ * segundos), y los suma a la lista del asistente.
+ */
+async function leerModelos(items, nombres, leer, vez) {
+  const errores = [];
+  leyendo = { total: items.length, hechos: 0, nombre: '' };
+  for (const [i, item] of items.entries()) {
+    if (!asistente.open || vez !== vezAsistente) return;     // se canceló mientras leía
+    leyendo.nombre = nombres[i];
+    pintarAsistente();
+    const r = await leer(item);
+    if (vez !== vezAsistente) return;
+    errores.push(...r.errores);
+    for (const m of r.mallas) {
+      const nombre = m.nombre ?? nombres[i];
+      if (propuestos.some((p) => (m.ruta ? p.ruta === m.ruta : p.id === m.id && p.nombre === nombre))) continue;
+      const maxilar = m.archivo.maxilar ?? null, mov = m.archivo.movimiento ?? '';
+      propuestos.push({ ...m, nombre, maxilar, mov, usar: !!(maxilar && mov) });
+    }
+    leyendo.hechos++;
+  }
+  propuestos.sort((a, b) => (a.maxilar ?? 'z').localeCompare(b.maxilar ?? 'z') || a.mov.localeCompare(b.mov, undefined, { numeric: true }) || a.nombre.localeCompare(b.nombre));
+  if (!campoCasoNuevo.value) campoCasoNuevo.value = propuestos.find((p) => p.archivo.id)?.archivo.id ?? '';
+  notaAsistente(...(errores.length ? [`No se pudieron leer: ${errores.join('; ')}`, true] : []));
+  leyendo = null;
+  pintarAsistente();
+}
+
+function pintarAsistente() {
+  $('asistente-carpetas').replaceChildren(...carpetasElegidas.map((c) => Object.assign(document.createElement('li'), { textContent: c })));
+  $('asistente-carpeta').textContent = carpetasElegidas.length ? 'Sumar otra carpeta…' : 'Elegir carpeta…';
+  // mientras lee: la barra y el archivo que está leyendo; solo se puede cancelar
+  const progreso = $('asistente-progreso');
+  progreso.hidden = !leyendo;
+  if (leyendo) {
+    const barra = /** @type {HTMLProgressElement} */ (progreso.querySelector('progress'));
+    barra.max = leyendo.total || 1; barra.value = leyendo.hechos;
+    /** @type {HTMLElement} */ (progreso.querySelector('span')).textContent = `Leyendo ${leyendo.hechos + 1} de ${leyendo.total}: ${leyendo.nombre}`;
+  }
+  /** @type {HTMLButtonElement} */ ($('asistente-carpeta')).disabled = !!leyendo;
+  $('asistente-soltar').classList.toggle('apagado', !!leyendo);
+  /** @type {HTMLButtonElement} */ ($('asistente-quitar')).disabled = !propuestos.length || !!leyendo;
+  $('asistente-lista').hidden = !propuestos.length;
+  const cuerpo = /** @type {HTMLElement} */ (document.querySelector('#asistente-tabla tbody'));
+  cuerpo.replaceChildren(...propuestos.map((a, i) => {
+    const tr = document.createElement('tr');
+    tr.className = a.usar ? '' : 'sin';
+    tr.innerHTML = `<td><input type="checkbox" data-i="${i}" data-campo="usar" ${a.usar ? 'checked' : ''}></td>
+      <td class="nombre"></td>
+      <td><select data-i="${i}" data-campo="maxilar"><option value="">?</option>${Object.entries(MAXILARES).map(([k, t]) => `<option value="${k}" ${a.maxilar === k ? 'selected' : ''}>${t.slice(0, 3)}</option>`).join('')}</select></td>
+      <td><input type="text" data-i="${i}" data-campo="mov" value="${a.mov}" maxlength="3"></td>`;
+    const nombre = /** @type {HTMLElement} */ (tr.querySelector('.nombre'));
+    nombre.textContent = a.nombre;
+    nombre.title = a.ruta ?? `${a.nombre}: se arrastró, no se sabe su carpeta`;
+    if (!a.ruta) nombre.append(Object.assign(document.createElement('span'), { className: 'sin-ruta', textContent: 'sin ruta' }));
+    return tr;
+  }));
+  const usados = propuestos.filter((p) => p.usar);
+  const ok = /** @type {HTMLButtonElement} */ ($('asistente-ok'));
+  ok.disabled = !usados.some((p) => p.maxilar && p.mov) || !!leyendo;
+  ok.textContent = usados.length ? `Crear proyecto (${usados.length} modelos)` : 'Crear proyecto';
+}
+
+$('asistente-tabla').addEventListener('change', (ev) => {
+  const el = /** @type {HTMLInputElement} */ (ev.target);
+  const a = propuestos[Number(el.dataset.i)];
+  if (!a) return;
+  if (el.dataset.campo === 'usar') a.usar = el.checked;
+  else if (el.dataset.campo === 'maxilar') a.maxilar = el.value || null;
+  else if (el.dataset.campo === 'mov') a.mov = el.value.trim() === '' ? '' : el.value.trim().padStart(2, '0');
+  pintarAsistente();
+});
+$('asistente-carpeta').addEventListener('click', elegirCarpetaAsistente);
+$('asistente-soltar').addEventListener('click', () => $('asistente-archivos').click());
+$('asistente-soltar').addEventListener('keydown', (ev) => { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); $('asistente-archivos').click(); } });
+$('asistente-archivos').addEventListener('change', (ev) => { const el = /** @type {HTMLInputElement} */ (ev.target); soltarEnAsistente([...(el.files ?? [])]); el.value = ''; });
+campoCasoNuevo.addEventListener('keydown', (ev) => { if (ev.key === 'Enter') ev.preventDefault(); });
+$('asistente-quitar').addEventListener('click', () => {
+  propuestos = []; carpetasElegidas = [];
+  soltarMallasSobrantes();
+  notaAsistente(); pintarAsistente();
+});
+asistente.addEventListener('close', () => {
+  if (asistente.returnValue === 'ok') crearProyecto();
+  else soltarMallasSobrantes();                               // las que se leyeron y no se usaron
+  asistente.returnValue = '';
+});
+
+/** Arma el proyecto con los modelos tildados y escribe el primer respaldo. */
+async function crearProyecto() {
+  const usados = propuestos.filter((p) => p.usar);
+  const caso = campoCasoNuevo.value.trim();
+  propuestos = []; carpetasElegidas = [];
+  nuevoProyecto(usados.map((p) => p.id));
+  /** @type {HTMLInputElement} */ ($('caso')).value = caso;
+  let hechos = 0;
+  for (const p of usados) {
+    avisar(`Cargando ${++hechos} de ${usados.length}: ${p.nombre}`);
+    try {
+      if (!visor.tiene(p.id)) visor.registrar(p.id, await api.bajarMalla(p.id));
+    } catch (e) { avisar(e.message, true); continue; }
+    estado.archivos.push({ malla: p.id, nombre: p.nombre, arriba: p.arriba, ruta: p.ruta, maxilar: p.maxilar, mov: p.mov, usar: true });
+  }
+  finCarga();
+  irAPaso('puntos');
+  await respaldar();
+  avisar(rutaRespaldo ? `Proyecto creado. Respaldo en ${rutaRespaldo}; Guardar (abajo) para elegir nombre y lugar.` : 'Proyecto creado.');
+}
+
+$('nuevo').addEventListener('click', abrirAsistente);
+$('vacio-nuevo').addEventListener('click', abrirAsistente);
 
 function datosTrabajo() {
   return {
@@ -774,18 +1030,21 @@ function datosTrabajo() {
 
 function avisarGuardado(nombre, sinRuta) {
   avisar(sinRuta
-    ? `Guardado: ${nombre}. De ${sinRuta} modelos no se sabe la carpeta: al abrirlo se buscan junto al .trimline, o usá «elegí carpeta».`
+    ? `Guardado: ${nombre}. De ${sinRuta} modelos no se sabe la carpeta: al abrirlo se buscan junto al .trimline.`
     : `Guardado: ${nombre}`);
 }
 
 async function guardar(como = false) {
+  if (!hayProyecto()) { avisar('No hay nada para guardar: cargá los modelos.'); return; }
   try {
     avisar('Guardando…');
     const inicial = carpetaDe(rutaTrabajo) ?? carpetaDe(estado.archivos.find((a) => a.ruta)?.ruta) ?? (campoCarpeta.value.trim() || null);
     const mismo = !como && rutaTrabajo && idTrabajo === idCaso();
     const r = await api.guardarEn({ trabajo: datosTrabajo(), ruta: mismo ? rutaTrabajo : null, inicial, nombre: `${idCaso()}.trimline` });
     if (!r.ruta) { avisar(''); return; }
-    rutaTrabajo = r.ruta; idTrabajo = idCaso();
+    // los arrastrados que se encontraron junto al .trimline ya tienen ruta (y el respaldo, carpeta)
+    for (const x of estado.archivos) x.ruta ??= r.rutas?.[x.malla];
+    marcarGuardado(r.ruta);
     avisarGuardado(r.ruta, r.sin_ruta.length);
   } catch (e) {
     if (e.status === 501) await guardarConElNavegador();
@@ -810,6 +1069,7 @@ async function guardarConElNavegador() {
       const w = await destino.createWritable();
       await w.write(blob); await w.close();
     } else bajar(`${idCaso()}.trimline`, blob);
+    marcarGuardado(null, destino?.name ?? `${idCaso()}.trimline`);
     avisarGuardado(destino?.name ?? `${idCaso()}.trimline`, sinRuta);
   } catch (e) { avisar(`No se pudo guardar: ${e.message}`, true); }
 }
@@ -830,14 +1090,15 @@ function abrirJson(t) {
   curvas.sup = {}; curvas.inf = {};
   alCambiarArchivos();
   const faltan = pendientes.filter((p) => !estado.archivos.some((a) => a.nombre === p.nombre)).length;
-  avisar(faltan ? `Trabajo abierto. Arrastrá sus ${faltan} modelos para verlo.` : 'Trabajo abierto.');
+  avisar(faltan ? `Trabajo abierto. Faltan ${faltan} modelos: buscalos en Modelos.` : 'Trabajo abierto.');
 }
 
 /** Un .trimline: queda todo como estaba al guardarlo. Los modelos se leen de donde estaban. */
 async function abrirTrabajo(archivo) {
   avisar('Abriendo…');
   await aplicarTrabajo(await api.abrirTrabajo(archivo), archivo.name);
-  rutaTrabajo = null;
+  marcarGuardado(null, archivo.name);
+  firmaRespaldo = firma();
 }
 
 async function aplicarTrabajo({ trabajo: t, mallas, faltan }, nombre) {
@@ -859,7 +1120,9 @@ async function aplicarTrabajo({ trabajo: t, mallas, faltan }, nombre) {
   }
   if (t.vista && 'modo' in t.vista) estado.modo = t.vista.modo;
   curvas.sup = {}; curvas.inf = {};
+  referencias = {};
   estado.maxilar = null;
+  soltarMallasSobrantes();                                    // las del proyecto anterior
   alCambiarArchivos();
   if (t.vista?.maxilar && movimientos(t.vista.maxilar).length) {
     if (t.vista.maxilar !== estado.maxilar) elegirMaxilar(t.vista.maxilar, true);
@@ -867,28 +1130,38 @@ async function aplicarTrabajo({ trabajo: t, mallas, faltan }, nombre) {
   }
   if (pendientes.length) {
     const donde = [...new Set(pendientes.map((p) => p.ruta?.replace(/[\\/][^\\/]*$/, '')).filter(Boolean))];
-    avisar(`Trabajo abierto, pero faltan ${pendientes.length} modelos${donde.length ? ` (no están en ${donde.join(', ')})` : ''}: arrastralos o usá «elegí carpeta».`, true);
+    avisar(`Trabajo abierto, pero faltan ${pendientes.length} modelos${donde.length ? ` (no están en ${donde.join(', ')})` : ''}: buscalos en Modelos → «Buscar en otra carpeta…».`, true);
   } else avisar(`Trabajo abierto: ${nombre}`);
 }
 
-$('abrir').addEventListener('click', async () => {
+/** Abre un .trimline del disco; sin `ruta`, con el diálogo del sistema. */
+async function abrirRuta(ruta = null, preguntar = true) {
+  if (preguntar && !descartarCambios('abrir otro')) return;
   try {
-    const r = await api.abrirDe({ inicial: carpetaDe(rutaTrabajo) ?? carpetaDe(estado.archivos.find((a) => a.ruta)?.ruta) });
+    const r = await api.abrirDe({ ruta, inicial: carpetaDe(rutaTrabajo) ?? carpetaDe(estado.archivos.find((a) => a.ruta)?.ruta) });
     if (!r.ruta) return;
     avisar('Abriendo…');
     await aplicarTrabajo(r, r.ruta);
-    rutaTrabajo = r.ruta; idTrabajo = idCaso();
+    if (/\.bak$/i.test(r.ruta)) {
+      marcarGuardado(null, '');
+      firmaGuardada = '';                                     // un respaldo no es el proyecto guardado
+      rutaRespaldo = r.ruta; claveRespaldo = r.ruta;
+    } else marcarGuardado(r.ruta);
+    firmaRespaldo = firma();
     olvidarHistorial();
+    pintarProyecto();
   } catch (e) {
-    if (e.status === 501) $('trabajo').click();                 // sin diálogos: el del navegador
+    if (e.status === 501 && !ruta) $('trabajo').click();     // sin diálogos: el del navegador
     else avisar(`No se pudo abrir: ${e.message}`, true);
   }
-});
+}
+$('abrir').addEventListener('click', () => abrirRuta());
+$('vacio-abrir').addEventListener('click', () => abrirRuta());
 $('trabajo').addEventListener('change', async (ev) => {
   const el = /** @type {HTMLInputElement} */ (ev.target);
   const archivo = el.files?.[0];
   el.value = '';
-  if (!archivo) return;
+  if (!archivo || !descartarCambios('abrir otro')) return;
   try {
     if (/\.curva$/i.test(archivo.name)) throw new Error('ese .curva son los datos del caso que salen al exportar; el trabajo se guarda en un .trimline');
     if (/\.json$/i.test(archivo.name)) abrirJson(JSON.parse(await archivo.text()));

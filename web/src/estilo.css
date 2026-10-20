@@ -42,6 +42,38 @@ section > h2:first-child { margin-top: 0; }
 #navegar { grid-template-columns: auto minmax(0, 1fr) auto; }
 #navegar button { white-space: nowrap; }
 #paso-actual { color: var(--tenue); font-size: 12px; text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* abajo de todo, siempre a la vista: el proyecto y Guardar */
+#proyecto { display: flex; align-items: center; gap: 8px; padding: 8px 12px; border-top: 1px solid var(--borde); }
+#nombre-proyecto { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--tenue); font-size: 12px; }
+#nombre-proyecto.cambios { color: var(--texto); }
+#proyecto button { flex: none; min-width: 96px; min-height: 30px; }
+
+/* sin proyecto: en el medio del visor, cómo empezar */
+#vacio { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); width: 320px; padding: 16px; text-align: center; background: rgba(255, 255, 255, 0.95); border: 1px solid #bbb; border-radius: 6px; }
+#vacio[hidden] { display: none; }
+#vacio p { margin: 0 0 10px; }
+
+/* el asistente de proyecto nuevo */
+#asistente { width: min(640px, calc(100vw - 32px)); max-height: calc(100vh - 48px); padding: 0; border: 1px solid var(--borde); border-radius: 6px; }
+#asistente::backdrop { background: rgba(0, 0, 0, 0.45); }
+#asistente form { display: flex; flex-direction: column; max-height: calc(100vh - 50px); padding: 16px; }
+#asistente h1 { margin-bottom: 4px; }
+#asistente-carpetas { margin: 4px 0; padding-left: 18px; overflow-wrap: anywhere; }
+#asistente-carpetas:empty { display: none; }
+#asistente-soltar { margin: 6px 0; padding: 12px 8px; text-align: center; color: var(--tenue); border: 1px dashed #888; border-radius: 4px; background: #fafafa; cursor: pointer; }
+#asistente-soltar small { display: block; margin-top: 3px; font-size: 11px; }
+#asistente-soltar:hover, #asistente-soltar.encima { background: #dde8fb; border-color: var(--azul); color: var(--texto); }
+#asistente-soltar.apagado { pointer-events: none; opacity: 0.5; }
+td.nombre .sin-ruta { margin-left: 4px; padding: 0 4px; font-size: 11px; color: #8a5a00; background: #fff3d6; border-radius: 3px; }
+#asistente-progreso { margin: 6px 0; }
+#asistente-progreso[hidden] { display: none; }
+#asistente-progreso progress { display: block; width: 100%; height: 8px; accent-color: var(--azul); }
+#asistente-progreso span { display: block; margin-top: 3px; color: var(--tenue); overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
+#asistente-lista { flex: 1; min-height: 0; overflow-y: auto; }
+#asistente .fila input { width: 50%; }
+.pie-asistente { display: flex; justify-content: flex-end; gap: 8px; margin-top: 10px; }
+.pie-asistente button { min-width: 110px; min-height: 30px; }
+.nota.error { color: #b00; }
 
 /* botones: grilla de columnas fijas, así no cambian de fila según el ancho */
 button, select, input { font: inherit; }

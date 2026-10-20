@@ -75,6 +75,17 @@ export async function crearVisor(contenedor) {
     geometrias.set(id, g);
   }
 
+  /** Proyecto nuevo: suelta las geometrías de antes (menos las de `conservar`). */
+  function olvidar(conservar = []) {
+    for (const [id, g] of geometrias) {
+      if (conservar.includes(id)) continue;
+      if (malla.geometry === g) { malla.visible = false; malla.geometry = new THREE.BufferGeometry(); }
+      g.disposeBoundsTree?.();
+      g.dispose();
+      geometrias.delete(id);
+    }
+  }
+
   /** Para el maxilar con `arriba` hacia +Y, centrado y con la base en el piso. */
   function orientar(id, arriba) {
     const g = geometrias.get(id);
@@ -324,5 +335,5 @@ export async function crearVisor(contenedor) {
     return motor.view.project([p.x, p.y, p.z]);
   }
 
-  return { referencia, opacidad, aPantalla, resaltar, posicion, controladoresEn, manijaEn, enPlano, moverManija, motor, lienzo, registrar, tiene: (id) => geometrias.has(id), orientar, mostrar, encuadrar, dibujar, moverPunto, picar, controladorEn };
+  return { referencia, opacidad, aPantalla, resaltar, posicion, controladoresEn, manijaEn, enPlano, moverManija, motor, lienzo, registrar, olvidar, tiene: (id) => geometrias.has(id), orientar, mostrar, encuadrar, dibujar, moverPunto, picar, controladorEn };
 }

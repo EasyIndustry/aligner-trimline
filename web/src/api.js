@@ -48,6 +48,10 @@ export const version = () => fetch('/api/version').then(json);
 
 /** Carga los modelos de una carpeta del disco: { carpeta, mallas: [resumen + archivo], errores }. */
 export const mallasDeCarpeta = (carpeta, nombres) => enviar('/api/mallas/carpeta', { carpeta, nombres });
+/** Qué modelos hay en una carpeta, sin leerlos: { carpeta, nombres }. */
+export const modelosDeCarpeta = (carpeta) => enviar('/api/mallas/carpeta', { carpeta, listar: true });
+/** Proyecto nuevo: el servidor suelta las mallas del anterior, menos las de `conservar`. */
+export const olvidarMallas = (conservar = []) => enviar('/api/mallas/olvidar', { conservar });
 
 /**
  * El trabajo como contenido de un archivo .trimline, sin las mallas (solo su ruta).
@@ -61,7 +65,10 @@ export async function guardarTrabajo(trabajo) {
   return { blob: await r.blob(), sinRuta: Number(r.headers.get('X-Sin-Ruta')) || 0 };
 }
 
-/** El servidor escribe el .trimline (sin `ruta`, pregunta dónde): { ruta, sin_ruta } o { ruta: null }. 501 = sin diálogos. */
+/**
+ * El servidor escribe el .trimline (sin `ruta`, pregunta dónde): { ruta, sin_ruta } o { ruta: null }.
+ * 501 = sin diálogos; 409 = ya había un archivo y se pidió `no_pisar`.
+ */
 export const guardarEn = (cuerpo) => enviar('/api/trabajo/guardar-en', cuerpo);
 /** El servidor abre un .trimline del disco (con su diálogo): { ruta, trabajo, mallas, faltan } o { ruta: null }. */
 export const abrirDe = (cuerpo) => enviar('/api/trabajo/abrir-de', cuerpo);

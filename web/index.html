@@ -27,7 +27,46 @@
       <output id="opacidad-valor">100%</output>
     </label>
     <button id="mostrar-panel" type="button" title="Mostrar el panel" hidden>‹</button>
+    <div id="vacio" hidden>
+      <p>No hay ningún proyecto abierto.</p>
+      <div class="botones cols-2">
+        <button id="vacio-nuevo" class="principal" type="button">Nuevo proyecto…</button>
+        <button id="vacio-abrir" type="button">Abrir…</button>
+      </div>
+    </div>
   </main>
+  <dialog id="asistente">
+    <form method="dialog">
+      <h1>Nuevo proyecto</h1>
+      <p class="nota">Elegí la carpeta con los modelos del caso (se pueden sumar otras). Cada modelo se lee de su carpeta y el proyecto anota su ruta completa.</p>
+      <div class="botones cols-2">
+        <button id="asistente-carpeta" class="principal" type="button">Elegir carpeta…</button>
+        <button id="asistente-quitar" type="button" disabled>Empezar de nuevo</button>
+      </div>
+      <div id="asistente-soltar" role="button" tabindex="0" title="También podés hacer clic para elegirlos">
+        Si no podés elegir la carpeta, arrastrá los STL acá (o hacé clic para elegirlos).
+        <small>El navegador no dice de qué carpeta vienen: se anota cuando guardes el proyecto junto a ellos.</small>
+      </div>
+      <input id="asistente-archivos" type="file" accept=".stl,.ply,.obj" multiple hidden />
+      <ul id="asistente-carpetas" class="nota"></ul>
+      <div id="asistente-progreso" hidden>
+        <progress max="1" value="0"></progress>
+        <span></span>
+      </div>
+      <label class="fila">ID del caso <input id="asistente-caso" type="text" placeholder="0044" /></label>
+      <div id="asistente-lista">
+        <table id="asistente-tabla">
+          <thead><tr><th title="Usar este modelo">Usar</th><th>Archivo</th><th>Maxilar</th><th>Mov.</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+      <p class="nota" id="asistente-nota">Tildá los modelos que usa el caso; los demás no se cargan. El primero de cada maxilar es la base.</p>
+      <div class="pie-asistente">
+        <button value="cancelar" type="submit">Cancelar</button>
+        <button id="asistente-ok" class="principal" value="ok" type="submit" disabled>Crear proyecto</button>
+      </div>
+    </form>
+  </dialog>
   <div id="borde" title="Arrastrá para cambiar el ancho del panel"></div>
   <aside id="panel">
     <header>
@@ -47,23 +86,24 @@
     <div id="pasos">
       <section data-paso="trabajo" data-titulo="Trabajo">
         <div class="botones cols-2">
-          <button id="guardar" class="principal" type="button" title="Ctrl+S. El trabajo en un archivo .trimline (los modelos no van adentro: solo dónde están). Ya guardado, vuelve a escribir el mismo archivo">Guardar</button>
-          <button id="guardar-como" type="button" title="Ctrl+Shift+S. Guardar en otro archivo">Guardar como…</button>
+          <button id="nuevo" class="principal" type="button" title="Empieza de cero: saca los modelos, los puntos y las referencias del proyecto actual">Nuevo proyecto</button>
           <button id="abrir" type="button">Abrir…</button>
+          <button id="guardar-como" type="button" title="Ctrl+Shift+S. Guardar en otro archivo">Guardar como…</button>
           <button id="salir" type="button" title="Apaga el servidor local">Salir</button>
         </div>
         <input id="trabajo" type="file" accept=".trimline,.json" hidden />
+        <p class="nota">Un proyecto es un caso: se crea eligiendo sus modelos. Mientras trabajás, una copia de respaldo se escribe sola en la carpeta de los modelos (<code>&lt;ID&gt;.trimline.bak</code>). Guardar (abajo, o Ctrl+S) pregunta la primera vez el nombre y dónde.</p>
         <p class="nota">El .trimline guarda los puntos, los ajustes y dónde está cada modelo (no los modelos).</p>
       </section>
 
       <section data-paso="modelos" data-titulo="Modelos">
-        <div id="soltar">Arrastrá los STL acá
+        <p class="nota" id="sin-modelos">Los modelos se eligen al crear el proyecto (Trabajo → Nuevo proyecto).</p>
+        <div id="faltantes" hidden>
+          <p class="nota error" id="faltan-texto"></p>
           <div class="botones cols-2">
-            <button id="elegir" type="button">Elegir archivos…</button>
-            <button id="elegir-modelos" type="button" title="Cargados desde su carpeta, el .trimline anota dónde están y al abrirlo se leen solos">Elegir carpeta…</button>
+            <button id="buscar-faltantes" type="button" title="Se leen de esa carpeta y el proyecto anota su ruta completa">Buscar en otra carpeta…</button>
           </div>
         </div>
-        <input id="archivos" type="file" accept=".stl,.ply,.obj" multiple hidden />
         <label class="fila">ID del caso <input id="caso" type="text" placeholder="0044" /></label>
         <table id="tabla">
           <thead><tr><th title="Usar este movimiento">Usar</th><th>Archivo</th><th>Maxilar</th><th>Mov.</th></tr></thead>
@@ -127,10 +167,16 @@
       </section>
     </div>
 
-    <footer id="navegar">
-      <button id="anterior" type="button">← Anterior</button>
-      <span id="paso-actual"></span>
-      <button id="siguiente" type="button">Siguiente →</button>
+    <footer>
+      <div id="navegar">
+        <button id="anterior" type="button">← Anterior</button>
+        <span id="paso-actual"></span>
+        <button id="siguiente" type="button">Siguiente →</button>
+      </div>
+      <div id="proyecto">
+        <span id="nombre-proyecto"></span>
+        <button id="guardar" class="principal" type="button" title="Ctrl+S. El trabajo en un archivo .trimline (los modelos no van adentro: solo dónde están). Ya guardado, vuelve a escribir el mismo archivo">Guardar</button>
+      </div>
     </footer>
   </aside>
   <script type="module" src="./src/main.js"></script>

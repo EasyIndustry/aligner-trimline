@@ -189,3 +189,11 @@ def obtener(ident: str) -> Malla:
 
 def descartar(ident: str) -> None:
     _MALLAS.pop(ident, None)
+
+
+def olvidar(conservar=()) -> int:
+    """Saca de memoria todas las mallas menos las de `conservar` (proyecto nuevo). Devuelve cuántas."""
+    fuera = [k for k in _MALLAS if k not in set(conservar)]
+    for k in fuera:
+        del _MALLAS[k]
+    return len(fuera)

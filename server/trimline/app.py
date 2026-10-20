@@ -94,10 +94,17 @@ def resolver(cuerpo: dict) -> dict:
 
 @app.post("/api/mallas/carpeta")
 def mallas_de_carpeta(cuerpo: dict) -> dict:
-    """Carga los modelos de una carpeta (todos, o los de `nombres`). Así se sabe dónde están."""
+    """Carga los modelos de una carpeta (todos, o los de `nombres`). Así se sabe dónde están.
+
+    Con `listar`, solo dice qué modelos hay (sin leerlos): la interfaz los pide de a uno para
+    mostrar cuál está leyendo.
+    """
     carpeta = Path(str(cuerpo.get("carpeta") or "")).expanduser()
     if not carpeta.is_dir():
         raise HTTPException(status_code=422, detail=f"no existe la carpeta {carpeta}")
+    if cuerpo.get("listar"):
+        return {"carpeta": str(carpeta), "nombres": [r.name for r in sorted(carpeta.iterdir())
+                                                     if r.is_file() and r.suffix.lower() in mallas.EXTENSIONES]}
     nombres_ = set(cuerpo.get("nombres") or [])
     cargadas, errores = [], []
     for ruta in sorted(carpeta.iterdir()):
@@ -110,6 +117,12 @@ def mallas_de_carpeta(cuerpo: dict) -> dict:
             continue
         cargadas.append({**m.resumen(), "nombre": ruta.name, "archivo": nombres.interpretar(ruta.name)})
     return {"carpeta": str(carpeta), "mallas": cargadas, "errores": errores}
+
+
+@app.post("/api/mallas/olvidar")
+def olvidar_mallas(cuerpo: dict) -> dict:
+    """Proyecto nuevo: libera las mallas del anterior (menos las de `conservar`)."""
+    return {"olvidadas": mallas.olvidar(cuerpo.get("conservar") or [])}
 
 
 @app.post("/api/referencia")
@@ -169,6 +182,8 @@ def _abierto(trabajo: dict, faltan: list[dict]) -> dict:
 
 
 FILTRO_TRABAJO = ("Trabajo de línea de recorte (*.trimline)", "*.trimline")
+# al abrir también el respaldo que se escribe solo (<ID>.trimline.bak, en la carpeta de los modelos)
+FILTRO_ABRIR = ("Trabajo de línea de recorte (*.trimline, *.trimline.bak)", "*.trimline;*.trimline.bak")
 
 
 def _dialogo(fn, *args):
@@ -184,18 +199,35 @@ def guardar_trabajo_en(cuerpo: dict) -> dict:
     """Escribe el .trimline en el disco. Sin `ruta`, la pide con el diálogo del sistema.
 
     Guardarlo desde acá deja saber su carpeta: ahí se buscan los modelos que se arrastraron.
+    Con `no_pisar` (el guardado automático de un proyecto nuevo), 409 si ya hay un archivo ahí.
+    Con `respaldo` y sin `ruta` (ningún modelo dice su carpeta: se arrastraron), el respaldo va
+    a la carpeta de datos del programa, en respaldos/<nombre>.
     """
+    if cuerpo.get("respaldo") and not cuerpo.get("ruta"):
+        carpeta = (_datos() or Path.home() / ".local" / "share" / "aligner-trimline") / "respaldos"
+        carpeta.mkdir(parents=True, exist_ok=True)
+        cuerpo = {**cuerpo, "ruta": str(carpeta / Path(cuerpo.get("nombre") or "trabajo.trimline.bak").name)}
     ruta = cuerpo.get("ruta") or _dialogo(dialogos.guardar_archivo, cuerpo.get("inicial"),
                                           cuerpo.get("nombre") or "trabajo.trimline", "Guardar el trabajo", FILTRO_TRABAJO)
     if not ruta:
         return {"ruta": None}
     ruta = Path(ruta).expanduser()
+    if cuerpo.get("no_pisar") and ruta.exists():
+        raise HTTPException(status_code=409, detail=f"ya hay un {ruta.name} en {ruta.parent}")
     datos, sin_ruta = snapshot.guardar(cuerpo.get("trabajo") or {}, ruta.parent)
     try:
         ruta.write_bytes(datos)
     except OSError as e:
         raise HTTPException(status_code=422, detail=f"no se pudo guardar en {ruta}: {e.strerror or e}") from None
-    return {"ruta": str(ruta), "sin_ruta": sin_ruta}
+    # la ruta de cada modelo, también la de los arrastrados que se encontraron junto al archivo
+    rutas = {}
+    for a in (cuerpo.get("trabajo") or {}).get("archivos", []):
+        try:
+            if mallas.obtener(a["malla"]).ruta:
+                rutas[a["malla"]] = mallas.obtener(a["malla"]).ruta
+        except KeyError:
+            pass
+    return {"ruta": str(ruta), "sin_ruta": sin_ruta, "rutas": rutas}
 
 
 @app.post("/api/trabajo/abrir-de")
@@ -204,7 +236,7 @@ def abrir_trabajo_de(cuerpo: dict) -> dict:
 
     Los modelos que no están en su ruta se buscan en la carpeta del .trimline.
     """
-    ruta = cuerpo.get("ruta") or _dialogo(dialogos.abrir_archivo, cuerpo.get("inicial"), "Abrir un trabajo", FILTRO_TRABAJO)
+    ruta = cuerpo.get("ruta") or _dialogo(dialogos.abrir_archivo, cuerpo.get("inicial"), "Abrir un trabajo", FILTRO_ABRIR)
     if not ruta:
         return {"ruta": None}
     ruta = Path(ruta).expanduser()

@@ -17,7 +17,12 @@ En Linux, desde una copia del repo:
 Arma el entorno la primera vez, levanta el servidor local y abre el navegador. En Windows se
 instala con `AlignerTrimlineSetup-<versión>.exe`, que sale de cada release.
 
-1. **Modelos.** Arrastrá los STL o usá "elegí carpeta". El nombre dice el maxilar y el
+1. **Proyecto nuevo.** Trabajo → "Nuevo proyecto" abre un asistente: elegí la carpeta con los
+   modelos del caso (se pueden sumar otras), tildá los que se usan y "Crear proyecto". Los
+   modelos se leen desde su carpeta, así el proyecto anota la ruta completa de cada uno. Si no
+   se puede elegir la carpeta, también se pueden arrastrar al asistente: quedan "sin ruta" hasta
+   que el proyecto se guarda junto a ellos (y mientras tanto el respaldo va a la carpeta de datos
+   del programa, en `respaldos/`). El nombre dice el maxilar y el
    movimiento: `0044 Apellido Nombre 1.0 sup 01.stl` o `BZ254-L22-A-solido.stl` (id, U/L de
    superior/inferior pegado al movimiento, tipo y después texto libre); lo que no se reconoce se
    corrige en la tabla. Destildá los movimientos que no se usan: el primero tildado de cada
@@ -35,12 +40,14 @@ instala con `AlignerTrimlineSetup-<versión>.exe`, que sale de cada release.
    `<ID>.curva` con los datos del caso (un JSON), igual que los que ya consume el generador del KUKA.
    Los escribe el programa en la carpeta elegida ("Elegir carpeta…" abre el diálogo del
    sistema; si ya hay archivos con ese nombre, pregunta antes de reemplazarlos).
-7. **Guardar.** `<ID>.trimline` es una foto del trabajo: puntos, keyframes, ajustes y la vista.
-   Las mallas no van adentro (sería mucho volumen guardando seguido): va la ruta de cada STL,
-   y al abrirlo se leen de ahí o, si no están, de la carpeta del `.trimline`. Guardar y Abrir
-   usan el diálogo del sistema; ya guardado, Guardar reescribe el mismo archivo y "Guardar
-   como…" (Ctrl+Shift+S) pregunta dónde. Si falta algún modelo, avisa cuál para arrastrarlo o
-   elegir su carpeta. Los `.trimline` de antes (con las mallas adentro) también se abren.
+7. **Guardar.** Mientras trabajás se escribe solo un respaldo, `<ID>.trimline.bak`, en la
+   carpeta de los modelos (se abre con Abrir… si algo se cerró mal). Guardar está siempre abajo
+   del panel, junto al nombre del proyecto (● si hay cambios sin guardar): la primera vez
+   pregunta el nombre y dónde; después reescribe ese archivo, y "Guardar como…" (Ctrl+Shift+S, en
+   Trabajo) pregunta de nuevo. El `.trimline` es una foto del trabajo: puntos, keyframes,
+   ajustes, la vista y la ruta completa de cada STL (las mallas no van adentro). Al abrirlo se
+   leen de ahí o, si no están, de la carpeta del `.trimline`; si falta alguno, Modelos → "Buscar
+   en otra carpeta…". Los `.trimline` de antes (con las mallas adentro) también se abren.
 
 Ctrl+Z deshace y Ctrl+Y (o Ctrl+Shift+Z) rehace; Ctrl+S guarda.
 
