@@ -267,7 +267,66 @@ function mostrar() {
   visor.mostrar(mov?.malla ?? null);
   visor.dibujar(mov ? curvas[estado.maxilar][estado.num] ?? null : null, estado.seleccion, estado.elegidos);
   visor.referencia(mov ? referencias[`${estado.maxilar}|${estado.num}`] ?? null : null);
+  const prop = mov ? propuestas[mov.malla] : null;
+  visor.propuesta(prop?.propuesta ?? null, prop?.margen ?? null);
   pintarHud();
+}
+
+// ---------- puntos automáticos: los que propone la forma del modelo ----------
+/** Lo que propuso el servidor, por malla: { propuesta: [{ id, tipo, pos }], margen: [{ tipo, pts }], dientes, cuerpos, metodo, segmentado }. */
+const propuestas = /** @type {Record<string, any>} */ ({});
+/** La malla donde se marcan los puntos: la del primer movimiento, o la de la curva adicional que se mira. */
+function mallaDePuntos() {
+  if (!estado.maxilar) return null;
+  const num = esAdicional(estado.num) ? estado.num : base(estado.maxilar);
+  const mov = numsLinea(estado.maxilar).find((m) => m.num === num);
+  return mov ? { num, malla: mov.malla } : null;
+}
+
+async function proponerPuntos() {
+  const donde = mallaDePuntos();
+  if (!donde) { avisar('Primero creá o abrí un proyecto con modelos.', true); return; }
+  if (estado.num !== donde.num) irA(donde.num);
+  const nombre = estado.archivos.find((a) => a.malla === donde.malla)?.nombre ?? '';
+  mostrarCarga('Segmentando…');
+  progresoCarga(`Buscando el margen gingival y separando los dientes${nombre ? ` en ${nombre}` : ''}`);
+  try {
+    const r = await api.proponer(donde.malla);
+    propuestas[donde.malla] = r;
+    // segmentado por huella: el modelo se pinta por diente mientras se mira la propuesta
+    visor.segmentacion(donde.malla, r.segmentado ? await api.etiquetas(donde.malla) : null);
+    const cuenta = (t) => r.propuesta.filter((p) => p.tipo === t).length;
+    avisar(`Propuestos: ${r.dientes} dientes, ${cuenta('v')} vestibulares, ${cuenta('l')} linguales y ${cuenta('e')} extremos`);
+  } catch (e) {
+    avisar(`No se pudieron proponer los puntos: ${e.message}`, true);
+  } finally {
+    cerrarCarga();
+  }
+  mostrar(); pintarPanel();
+}
+
+/** Reemplaza los puntos del maxilar (o de la curva adicional) por los propuestos. */
+function usarPropuesta() {
+  const donde = mallaDePuntos(), max = actual();
+  const prop = donde && propuestas[donde.malla];
+  if (!max || !prop) return;
+  if (max.controladores.length && !confirm(`Se reemplazan los ${max.controladores.length} puntos por los ${prop.propuesta.length} propuestos. ¿Seguir? (Ctrl+Z lo deshace)`)) return;
+  recordar();
+  const sello = Date.now().toString(36);
+  max.controladores = prop.propuesta.map((p) => ({ id: `c${sello}${p.id}`, tipo: p.tipo, claves: { [donde.num]: p.pos } }));
+  max.inversas = {};
+  delete propuestas[donde.malla];
+  visor.segmentacion(donde.malla, null);
+  estado.seleccion = null; estado.elegidos = new Set();
+  if (estado.num !== donde.num) irA(donde.num);
+  mostrar(); pintarPanel(); resolverTodo();
+  avisar('Puntos propuestos aplicados: revisalos y ajustá la curva (Ctrl+Z vuelve atrás)');
+}
+
+function descartarPropuesta() {
+  const donde = mallaDePuntos();
+  if (donde) { delete propuestas[donde.malla]; visor.segmentacion(donde.malla, null); }
+  mostrar(); pintarPanel();
 }
 
 // ---------- el servidor resuelve las curvas ----------
@@ -795,6 +854,14 @@ function pintarPanel() {
   /** @type {HTMLButtonElement} */ ($('borrar-clave')).disabled = !(sel && estado.num && sel.claves[estado.num] && estado.num !== base(estado.maxilar) && !esAdicional(estado.num));
   const inversa = esInversa(estado.seleccion) ? max?.inversas?.[estado.seleccion.slice(2)] : null;
   /** @type {HTMLButtonElement} */ ($('restablecer')).disabled = !(sel?.manijas || inversa);
+  const donde = mallaDePuntos();
+  const prop = donde ? propuestas[donde.malla] : null;
+  /** @type {HTMLButtonElement} */ ($('proponer')).disabled = !donde;
+  /** @type {HTMLButtonElement} */ ($('usar-propuesta')).disabled = !prop;
+  /** @type {HTMLButtonElement} */ ($('descartar-propuesta')).disabled = !prop;
+  $('info-propuesta').textContent = prop
+    ? `${prop.dientes} dientes, por ${prop.metodo}${prop.segmentado ? ' (cada diente pintado de un color)' : ''}${prop.cuerpos > 1 && !prop.segmentado ? `; el archivo trae ${prop.cuerpos} mallas: se usó la más grande` : ''}.`
+    : '';
   // las casillas muestran a los elegidos: tildada si todos siguen, a medias si algunos
   const elegidos = max?.controladores.filter((c) => estado.elegidos.has(c.id)) ?? [];
   for (const campo of ['offset', 'festoneado']) {
@@ -841,6 +908,9 @@ for (const b of document.querySelectorAll('#modos button')) b.addEventListener('
 $('borrar-punto').addEventListener('click', borrarPunto);
 $('borrar-clave').addEventListener('click', quitarClave);
 $('restablecer').addEventListener('click', restablecerFeston);
+$('proponer').addEventListener('click', proponerPuntos);
+$('usar-propuesta').addEventListener('click', usarPropuesta);
+$('descartar-propuesta').addEventListener('click', descartarPropuesta);
 for (const campo of ['offset', 'festoneado']) {
   $(`usa-${campo}`).addEventListener('change', (ev) => {
     const sigue = /** @type {HTMLInputElement} */ (ev.target).checked;

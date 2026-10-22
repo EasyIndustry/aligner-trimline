@@ -26,6 +26,24 @@ function matcapYeso() {
   t.colorSpace = THREE.SRGBColorSpace;
   return t;
 }
+/** El matcap del modelo pintado por diente: casi blanco, así el color de cada diente se ve tal cual. */
+function matcapClaro() {
+  const c = document.createElement('canvas');
+  c.width = c.height = 256;
+  const g = /** @type {CanvasRenderingContext2D} */ (c.getContext('2d'));
+  const r = g.createRadialGradient(104, 92, 4, 128, 128, 168);
+  r.addColorStop(0, '#ffffff'); r.addColorStop(0.4, '#e2e2e2'); r.addColorStop(0.75, '#9a9a9a'); r.addColorStop(1, '#4a4a4a');
+  g.fillStyle = r; g.fillRect(0, 0, 256, 256);
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace;
+  return t;
+}
+/** El color de una cara segmentada: cada diente (0..) un tono saturado y distinto del vecino; la encía rosada, los attachments oscuros y la base gris. */
+function colorDeSegmento(k, c) {
+  if (k >= 0) return c.setHSL(((k + 1) * 0.381966) % 1, 0.8, 0.55);
+  return c.set(k === -1 ? 0xd9a0a6 : k === -2 ? 0x333333 : 0x8a8a8a);
+}
+
 /** A cuánto (mm) del mouse un punto ya se agranda y se deja agarrar. */
 const CERCA_MM = 0.5;
 
@@ -64,9 +82,12 @@ export async function crearVisor(contenedor) {
   raiz.add(malla);
 
   const geometrias = new Map();
+  /** Los índices como vinieron del servidor: computeBoundsTree reordena los de la geometría. */
+  const indicesOriginales = new Map();
   /** @param {string} id @param {{ posiciones: Float32Array, indices: Uint32Array }} datos */
   function registrar(id, datos) {
     if (geometrias.has(id)) return;
+    indicesOriginales.set(id, datos.indices.slice());
     const g = new THREE.BufferGeometry();
     g.setAttribute('position', new THREE.BufferAttribute(datos.posiciones, 3));
     g.setIndex(new THREE.BufferAttribute(datos.indices, 1));
@@ -79,10 +100,14 @@ export async function crearVisor(contenedor) {
   function olvidar(conservar = []) {
     for (const [id, g] of geometrias) {
       if (conservar.includes(id)) continue;
-      if (malla.geometry === g) { malla.visible = false; malla.geometry = new THREE.BufferGeometry(); }
+      if (malla.geometry === g || malla.geometry === pintadas.get(id)) { malla.visible = false; malla.geometry = new THREE.BufferGeometry(); }
+      pintadas.get(id)?.disposeBoundsTree();
+      pintadas.get(id)?.dispose();
+      pintadas.delete(id);
       g.disposeBoundsTree?.();
       g.dispose();
       geometrias.delete(id);
+      indicesOriginales.delete(id);
     }
   }
 
@@ -99,10 +124,49 @@ export async function crearVisor(contenedor) {
     raiz.updateMatrixWorld(true);
   }
 
+  // ---------- segmentación: el modelo pintado con un color por diente ----------
+  // Una copia sin índices (cada cara con sus tres vértices) para poder pintar por cara; tiene las
+  // caras en el mismo orden, así el rayo del mouse da la misma cara que en la original.
+  const matSegmentos = new THREE.MeshMatcapMaterial({ matcap: matcapClaro(), vertexColors: true });
+  matSegmentos.polygonOffset = true; matSegmentos.polygonOffsetFactor = 1; matSegmentos.polygonOffsetUnits = 2;
+  const pintadas = new Map();
+  let actual = /** @type {string | null} */ (null);
+  /** Pinta la malla `id` según el segmento de cada cara (Int16Array), o le saca la pintura (null). */
+  function segmentacion(id, etiquetas) {
+    pintadas.get(id)?.disposeBoundsTree();
+    pintadas.get(id)?.dispose();
+    pintadas.delete(id);
+    const g = geometrias.get(id), indices = indicesOriginales.get(id);
+    if (g && indices && etiquetas) {
+      // cara f = la f-ésima del servidor: se arma con los índices originales, no con los de g
+      const pos = g.getAttribute('position').array, nor = g.getAttribute('normal').array;
+      const p = new THREE.BufferGeometry();
+      const P = new Float32Array(indices.length * 3), N = new Float32Array(indices.length * 3);
+      const col = new Float32Array(indices.length * 3);
+      const c = new THREE.Color();
+      for (let i = 0; i < indices.length; i++) {
+        const v = indices[i] * 3;
+        P[i * 3] = pos[v]; P[i * 3 + 1] = pos[v + 1]; P[i * 3 + 2] = pos[v + 2];
+        N[i * 3] = nor[v]; N[i * 3 + 1] = nor[v + 1]; N[i * 3 + 2] = nor[v + 2];
+        colorDeSegmento(etiquetas[Math.floor(i / 3)] ?? -1, c);
+        c.toArray(col, i * 3);
+      }
+      p.setAttribute('position', new THREE.BufferAttribute(P, 3));
+      p.setAttribute('normal', new THREE.BufferAttribute(N, 3));
+      p.setAttribute('color', new THREE.BufferAttribute(col, 3));
+      p.computeBoundsTree();
+      pintadas.set(id, p);
+    }
+    mostrar(actual);
+  }
+
   function mostrar(id) {
-    const g = id && geometrias.get(id);
+    actual = id;
+    const pintada = id ? pintadas.get(id) : null;
+    const g = pintada ?? (id && geometrias.get(id));
     malla.visible = !!g;
     if (g) malla.geometry = g;
+    malla.material = pintada ? matSegmentos : material;
   }
 
   function encuadrar() {
@@ -204,7 +268,8 @@ export async function crearVisor(contenedor) {
   const mundo = new THREE.Vector3();
   let resaltado = /** @type {string | null} */ (null);
   motor.onFrame(() => {
-    for (const m of puntos.children) {
+    for (const m of [...puntos.children, ...previa.children]) {
+      if (!m.userData.radio) continue;                        // las líneas del margen no se escalan
       m.getWorldPosition(mundo);
       const grande = m.userData.id && m.userData.id === resaltado ? 1.45 : 1;
       m.scale.setScalar(motor.view.worldPerPixel([mundo.x, mundo.y, mundo.z]) * m.userData.radio * grande);
@@ -320,13 +385,40 @@ export async function crearVisor(contenedor) {
     }
   }
 
+  // ---------- puntos propuestos y el margen que encontró (solo se miran, no se agarran) ----------
+  const previa = new THREE.Group();
+  raiz.add(previa);
+  const matPrevia = Object.fromEntries(['v', 'l', 'e'].map((k) => [k, new THREE.MeshBasicMaterial({ color: COLORES[k], transparent: true, opacity: 0.55, depthTest: false })]));
+  const matMargen = Object.fromEntries(['v', 'l', 'limite'].map((k) => [k, new LineMaterial({ color: COLORES[k] ?? 0xffffff, linewidth: 1.5, transparent: true, opacity: 0.85 })]));
+  /** Dibuja los puntos propuestos ([{ tipo, pos }]) y las líneas del margen ([{ tipo, pts: [[x, y, z]] }]), o los saca (null). */
+  function propuesta(lista, margen = null) {
+    for (const o of [...previa.children]) { if (o instanceof Line2) o.geometry.dispose(); previa.remove(o); }
+    for (const p of lista ?? []) {
+      const m = new THREE.Mesh(esfera, matPrevia[p.tipo]);
+      m.position.set(p.pos[0], p.pos[1], p.pos[2]);
+      m.userData = { radio: RADIO_PX * 0.9, noEdge: true, noAO: true };
+      m.renderOrder = 5;
+      previa.add(m);
+    }
+    for (const { tipo, pts } of margen ?? []) {
+      if (pts.length < 2) continue;
+      const l = new Line2(new LineGeometry().setPositions(pts.flat()), matMargen[tipo] ?? matMargen.limite);
+      l.userData = { noEdge: true, noAO: true };
+      l.frustumCulled = false;
+      l.renderOrder = 4;
+      previa.add(l);
+    }
+  }
+
   /** La opacidad del modelo (1 = sólido). Transparente, la curva y los puntos de atrás se ven. */
   function opacidad(v) {
     const transparente = v < 0.999;
-    material.transparent = transparente;
-    material.opacity = v;
-    material.depthWrite = !transparente;      // si escribe profundidad, lo de atrás igual no se ve
-    material.needsUpdate = true;
+    for (const mat of [material, matSegmentos]) {
+      mat.transparent = transparente;
+      mat.opacity = v;
+      mat.depthWrite = !transparente;         // si escribe profundidad, lo de atrás igual no se ve
+      mat.needsUpdate = true;
+    }
   }
 
   /** Dónde cae en el visor un punto dado en coordenadas del archivo: [x, y] en píxeles. */
@@ -335,5 +427,5 @@ export async function crearVisor(contenedor) {
     return motor.view.project([p.x, p.y, p.z]);
   }
 
-  return { referencia, opacidad, aPantalla, resaltar, posicion, controladoresEn, manijaEn, enPlano, moverManija, motor, lienzo, registrar, olvidar, tiene: (id) => geometrias.has(id), orientar, mostrar, encuadrar, dibujar, moverPunto, picar, controladorEn };
+  return { segmentacion, propuesta, referencia, opacidad, aPantalla, resaltar, posicion, controladoresEn, manijaEn, enPlano, moverManija, motor, lienzo, registrar, olvidar, tiene: (id) => geometrias.has(id), orientar, mostrar, encuadrar, dibujar, moverPunto, picar, controladorEn };
 }

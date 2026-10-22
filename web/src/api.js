@@ -33,6 +33,14 @@ export async function bajarMalla(id) {
   };
 }
 
+/** Los puntos que propone el modelo: { propuesta: [{ id, tipo, pos }], margen: [{ tipo, pts }], dientes, cuerpos, metodo, segmentado }. */
+export const proponer = (malla) => enviar(`/api/mallas/${malla}/proponer`);
+/** El diente de cada cara de una malla segmentada (Int16Array: 0.. dientes, -1 encía, -2 attachment, -3 base). */
+export async function etiquetas(malla) {
+  const r = await fetch(`/api/mallas/${malla}/etiquetas`);
+  if (!r.ok) throw new Error('no se pudo bajar la segmentación');
+  return new Int16Array(await r.arrayBuffer());
+}
 export const resolver = (maxilar, nums, n = 300) => enviar('/api/resolver', { maxilar, nums, n });
 export const exportadores = () => fetch('/api/exportadores').then(json);
 /** Exporta; con `carpeta` el servidor escribe ahí los archivos (409 si ya hay y no se pidió `pisar`). */

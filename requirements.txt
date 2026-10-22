@@ -5,6 +5,8 @@ uvicorn>=0.32
 numpy>=2.0
 scipy>=1.13
 trimesh>=4.5
+# la segmentación de los dientes (segmentar.py): encadenar el límite gingival
+networkx>=3.2
 # valida los certificados con el almacén del sistema (el actualizador, en redes de empresa)
 truststore>=0.10
 # el ícono en la bandeja del sistema, solo en Windows

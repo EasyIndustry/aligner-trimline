@@ -1,9 +1,13 @@
 #!/usr/bin/env bash
-# Abre el programa en Linux desde un checkout: arma el entorno la primera vez y lanza.
+# Abre el programa en Linux desde un checkout: arma el entorno la primera vez (y de nuevo si
+# cambian las dependencias) y lanza.
 set -euo pipefail
 cd "$(dirname "$0")"
 if [[ ! -x .venv/bin/python ]]; then
   python3 -m venv .venv
+fi
+if [[ ! -f .venv/.requisitos || requirements.txt -nt .venv/.requisitos ]]; then
   .venv/bin/pip install -q -r requirements.txt
+  touch .venv/.requisitos
 fi
 exec .venv/bin/python lanzador.py "$@"

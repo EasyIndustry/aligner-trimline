@@ -158,6 +158,14 @@
           <button id="borrar-clave" type="button" title="Tecla K">Quitar keyframe</button>
           <button id="restablecer" type="button" title="Vuelve a las tangentes calculadas">Restablecer festón</button>
         </div>
+        <h2>Puntos automáticos</h2>
+        <p class="nota">Busca el margen gingival en el modelo y propone un punto vestibular y uno lingual por diente, y los extremos. Se ven transparentes, con la línea del margen que encontró; si sirven, se usan y se corrigen a mano.</p>
+        <div class="botones cols-3">
+          <button id="proponer" type="button" title="Sobre el primer movimiento del maxilar (o la curva adicional que se mira)">Proponer puntos</button>
+          <button id="usar-propuesta" class="principal" type="button" disabled title="Reemplaza los puntos de este maxilar por los propuestos (Ctrl+Z lo deshace)">Usarlos</button>
+          <button id="descartar-propuesta" type="button" disabled>Descartar</button>
+        </div>
+        <p class="nota" id="info-propuesta"></p>
         <p class="nota">Shift + clic suma o saca un punto de la selección; shift + arrastrar en un lugar vacío elige todos los del rectángulo. Sin offset o sin festoneado, el diente no se mueve con ese deslizador y la curva va recta.</p>
       </section>
 

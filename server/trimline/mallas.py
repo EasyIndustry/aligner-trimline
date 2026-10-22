@@ -24,6 +24,7 @@ class Malla:
     arriba: np.ndarray       # (3,) unitario: de la base hacia los dientes
     base: float              # altura de la base sobre `arriba`
     ruta: str | None = None  # de dónde se leyó, si se sabe (lo arrastrado al navegador no la trae)
+    etiquetas: np.ndarray | None = field(repr=False, default=None)   # segmentación: diente por cara (<0 no)
     _tri: np.ndarray = field(repr=False, default=None)
     _arbol: cKDTree = field(repr=False, default=None)
 
