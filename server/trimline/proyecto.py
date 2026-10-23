@@ -59,23 +59,26 @@ def resolver(maxilar: dict, num: str, n: int | None = 500, paso: float | None = 
     mov = next(m for m in movs if m["num"] == num)
     malla = mallas.obtener(mov["malla"], mov.get("ruta"))
     # en este movimiento, ¿va sin offset o sin festoneado? Es como si ningún controlador los
-    # siguiera: los puntos y los deslizadores no cambian, y los demás movimientos tampoco
+    # siguiera: los puntos y los deslizadores no cambian, y los demás movimientos tampoco.
+    # Sin festoneado tampoco va el festón hecho a mano (crestas inversas corridas y manijas):
+    # muchas veces es todo el festón, con el deslizador en cero, y si no el corte no sale seco
     sin = (maxilar.get("sinAjuste") or {}).get(num) or {}
+    sin_feston = sin.get("festoneado", True) is False
     ctrl = []
     for c in maxilar.get("controladores", []):
         p = posicion(c, nums, num)
         if p is None:
             continue
         ctrl.append({"id": c["id"], "tipo": c["tipo"], "pos": p, "clave": num in c.get("claves", {}),
-                     "manijas": c.get("manijas"),
+                     "manijas": None if sin_feston else c.get("manijas"),
                      "offset": c.get("offset", True) and sin.get("offset", True) is not False,
-                     "festoneado": c.get("festoneado", True) and sin.get("festoneado", True) is not False})
+                     "festoneado": c.get("festoneado", True) and not sin_feston})
     if ctrl:
         sobre = malla.mas_cercano(np.array([c["pos"] for c in ctrl]))
         for c, p in zip(ctrl, sobre):
             c["pos"] = p
     res = curva.generar(malla, ctrl, float(maxilar.get("offset", 0.0)), float(maxilar.get("amplitud", 0.0)), n=n, paso=paso,
-                        ancho=float(maxilar.get("ancho", curva.ANCHO)), inversas=maxilar.get("inversas"),
+                        ancho=float(maxilar.get("ancho", curva.ANCHO)), inversas=None if sin_feston else maxilar.get("inversas"),
                         lingual=maxilar.get("lingual"))
     res["controladores"] = ctrl
     res["num"] = num

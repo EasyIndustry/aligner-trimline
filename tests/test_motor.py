@@ -274,3 +274,19 @@ def test_un_movimiento_sin_offset_ni_festoneado(malla):
     i = next(k for k, info in enumerate(solo["info"]) if info.get("clave") == "v2|v3")
     assert plano[i][2] + 0.5 < solo["claves"][i][2] < con[i][2] - 1.0
     assert m["controladores"][0]["claves"] == anillo()[0]["claves"]          # los puntos no se tocan
+
+
+def test_sin_festoneado_no_va_el_feston_hecho_a_mano(malla):
+    """Como en BZ443: deslizadores en cero y todo el festón hecho a mano (papilas corridas y manijas)."""
+    m = maxilar(malla)
+    m["inversas"] = {"v2|v3": [0.0, 0.0, 2.0], "l2|l3": [0.0, 0.0, 1.5]}
+    m["controladores"][2]["manijas"] = {"a": [0.0, 3.0, 1.0], "b": [0.0, -3.0, 1.0]}
+    plano = proyecto.resolver(maxilar(malla), "02")["tramos"][0]
+    a_mano = proyecto.resolver(m, "01")["tramos"][0]
+    assert not np.allclose(a_mano["claves"], plano["claves"], atol=0.5)
+    m["sinAjuste"] = {"02": {"festoneado": False}}
+    sin = proyecto.resolver(m, "02")["tramos"][0]
+    assert np.allclose(sin["claves"], plano["claves"], atol=1e-6)            # el 02 sale seco
+    assert np.allclose(sin["manijas"], plano["manijas"], atol=1e-6)
+    assert np.allclose(proyecto.resolver(m, "01")["tramos"][0]["claves"], a_mano["claves"], atol=1e-6)
+    assert m["inversas"]["v2|v3"] == [0.0, 0.0, 2.0]                         # lo hecho a mano queda guardado
