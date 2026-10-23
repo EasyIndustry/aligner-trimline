@@ -293,16 +293,18 @@ def exportar_trabajo(cuerpo: dict) -> dict:
                 continue
             con_clave = set(proyecto.con_keyframe(maxilar))
             if "datos" not in trabajo:
-                trabajo["datos"] = nombres.interpretar(mallas.obtener(maxilar["movimientos"][0]["malla"]).nombre)
+                m0 = maxilar["movimientos"][0]
+                trabajo["datos"] = nombres.interpretar(mallas.obtener(m0["malla"], m0.get("ruta")).nombre)
             def resuelta(mx: dict, m: dict) -> dict:
                 r = proyecto.resolver(mx, m["num"], n=int(n) if n else None, paso=float(paso) if paso else None)
                 if not r["cerrada"]:
                     raise ValueError(f"{clave} {m['num']}: la curva no está cerrada (faltan vestibulares, linguales o los dos extremos)")
                 orden = {c["id"]: c for c in r["controladores"]}
                 t = r["tramos"][0]
-                frente = mallas.obtener(m["malla"]).mas_cercano(curva.desde_el_frente(t["puntos"], t["claves"], t["info"]))
+                malla = mallas.obtener(m["malla"], m.get("ruta"))
+                frente = malla.mas_cercano(curva.desde_el_frente(t["puntos"], t["claves"], t["info"]))
                 return {
-                    "num": m["num"], "cerrada": True, "curva": frente, "modelo": mallas.obtener(m["malla"]).nombre,
+                    "num": m["num"], "cerrada": True, "curva": frente, "modelo": malla.nombre,
                     "controladores": [orden[i["id"]] for i in t["info"] if i["clase"] == "cresta"],
                     "tiene_clave": m["num"] in con_clave,
                 }

@@ -110,3 +110,39 @@ def test_reintenta_mientras_la_carpeta_esta_tomada(tmp_path, monkeypatch):
     monkeypatch.setattr(cambio.time, "sleep", lambda s: None)
     assert cambio.cambiar(p, "instalar", "v0.3.1") == "v0.3.1"
     assert intentos.count("app") == 3
+
+
+def _wheel(nombre: str, requiere: list[str] = ()) -> bytes:
+    import io
+    import zipfile
+    b = io.BytesIO()
+    with zipfile.ZipFile(b, "w") as z:
+        z.writestr(f"{nombre}/__init__.py", "X = 1\n")
+        meta = f"Metadata-Version: 2.1\nName: {nombre}\nVersion: 1.0\n" + "".join(f"Requires-Dist: {r}\n" for r in requiere)
+        z.writestr(f"{nombre}-1.0.dist-info/METADATA", meta)
+    return b.getvalue()
+
+
+def test_baja_las_librerias_nuevas_y_lo_que_piden(tmp_path, monkeypatch):
+    """Un release que pide una librería que la instalación no trae: si es Python puro, se baja."""
+    pedidos = []
+    def wheel(nombre, version):
+        pedidos.append((nombre, version))
+        req = {"libnueva": ["libdep>=1", "otra; extra == 'docs'"]}.get(nombre, [])
+        return f"{nombre}-1.0-py3-none-any.whl", "1.0", _wheel(nombre, req)
+    monkeypatch.setattr(actualizar, "_wheel_puro", wheel)
+    hechas = actualizar.instalar_librerias({"libnueva": "libnueva==1.0", "numpy": "numpy>=2.0"}, tmp_path)
+    assert sorted(hechas) == ["libdep-1.0-py3-none-any.whl", "libnueva-1.0-py3-none-any.whl"]
+    assert ("libnueva", "1.0") in pedidos and ("libdep", None) in pedidos
+    assert not any(n in ("numpy", "otra") for n, _ in pedidos)       # ya está / es de un extra
+    assert (tmp_path / "libnueva" / "__init__.py").exists() and (tmp_path / "libdep" / "__init__.py").exists()
+
+
+def test_una_libreria_compilada_no_se_instala(tmp_path, monkeypatch):
+    def wheel(nombre, version):
+        raise ValueError(f"{nombre} no es Python puro: hay que bajar el instalador")
+    monkeypatch.setattr(actualizar, "_wheel_puro", wheel)
+    import pytest
+    with pytest.raises(ValueError, match="no es Python puro"):
+        actualizar.instalar_librerias({"compilada": "compilada"}, tmp_path)
+    assert not list(tmp_path.iterdir())

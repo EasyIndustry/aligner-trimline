@@ -139,6 +139,8 @@ def _detectar_base(v: np.ndarray, f: np.ndarray) -> tuple[np.ndarray, float]:
 
 
 _MALLAS: dict[str, Malla] = {}
+# de dónde se leyó cada malla, aunque se haya soltado: si se vuelve a pedir, se relee de ahí
+_RUTAS: dict[str, str] = {}
 
 
 EXTENSIONES = (".stl", ".ply", ".obj")
@@ -147,6 +149,8 @@ EXTENSIONES = (".stl", ".ply", ".obj")
 def cargar(datos: bytes, nombre: str, ruta: str | None = None) -> Malla:
     """Carga un STL (u otro formato de malla que lea trimesh) y lo deja indexado en memoria."""
     ident = hashlib.sha1(datos).hexdigest()[:16]
+    if ruta:
+        _RUTAS[ident] = ruta
     if ident in _MALLAS:
         if ruta:
             _MALLAS[ident].ruta = ruta
@@ -180,11 +184,20 @@ def desde_binario(ident: str, nombre: str, datos: bytes, arriba, base: float) ->
     return malla
 
 
-def obtener(ident: str) -> Malla:
-    try:
+def obtener(ident: str, ruta: str | None = None) -> Malla:
+    """La malla `ident`. Si no está en memoria (la soltó otro proyecto, o el servidor se
+    reinició con la página abierta), se vuelve a leer de `ruta` o de donde se leyó antes,
+    siempre que el archivo siga siendo el mismo."""
+    if ident in _MALLAS:
         return _MALLAS[ident]
-    except KeyError:
-        raise KeyError(f"malla {ident} no está cargada") from None
+    for r in dict.fromkeys(filter(None, (ruta, _RUTAS.get(ident)))):
+        try:
+            datos = Path(r).read_bytes()
+        except OSError:
+            continue
+        if hashlib.sha1(datos).hexdigest()[:16] == ident:
+            return cargar(datos, Path(r).name, str(Path(r).resolve()))
+    raise KeyError(f"malla {ident} no está cargada")
 
 
 def descartar(ident: str) -> None:

@@ -89,13 +89,13 @@ function progresoCarga(texto, hechos = 0, total = 0) {
 function cerrarCarga() { if (carga.open) carga.close(); }
 
 // ---------- lo que se deriva del estado ----------
-/** Los movimientos elegidos de un maxilar, en orden: [{ num, malla }]. */
+/** Los movimientos elegidos de un maxilar, en orden: [{ num, malla, ruta }] (con la ruta, el servidor relee un modelo que soltó). */
 function movimientos(maxilar) {
   return estado.archivos
     .filter((a) => a.usar && a.maxilar === maxilar && a.mov !== '')
     .sort((a, b) => a.mov.localeCompare(b.mov, undefined, { numeric: true }))
     .filter((a, i, t) => i === 0 || t[i - 1].mov !== a.mov)
-    .map((a) => ({ num: a.mov, malla: a.malla }));
+    .map((a) => ({ num: a.mov, malla: a.malla, ruta: a.ruta ?? null }));
 }
 const base = (maxilar) => movimientos(maxilar)[0]?.num ?? null;
 /** Lo que no lleva un movimiento del maxilar: { offset?: false, festoneado?: false }. */
@@ -123,7 +123,10 @@ const esAdicional = (num) => typeof num === 'string' && num.startsWith('X');
 function adicionales(maxilar) {
   const movs = movimientos(maxilar);
   return Object.entries(estado.maxilares[maxilar]?.adicionales ?? {})
-    .map(([num, ad]) => ({ num, origen: ad.origen, malla: movs.find((m) => m.num === ad.origen)?.malla }))
+    .map(([num, ad]) => {
+      const mov = movs.find((m) => m.num === ad.origen);
+      return { num, origen: ad.origen, malla: mov?.malla, ruta: mov?.ruta ?? null };
+    })
     .filter((a) => a.malla)
     .sort((a, b) => a.origen.localeCompare(b.origen, undefined, { numeric: true }));
 }
@@ -141,7 +144,7 @@ const numsEditables = () => (esAdicional(estado.num) ? [estado.num] : movimiento
 const paraServidor = (maxilar) => ({ ...estado.maxilares[maxilar], movimientos: movimientos(maxilar) });
 /** Una adicional como un maxilar de un solo movimiento, sobre la malla de su origen. */
 const paraServidorAd = (maxilar, num) => ({
-  ...estado.maxilares[maxilar].adicionales[num], movimientos: adicionales(maxilar).filter((a) => a.num === num).map(({ num: n, malla }) => ({ num: n, malla })),
+  ...estado.maxilares[maxilar].adicionales[num], movimientos: adicionales(maxilar).filter((a) => a.num === num).map(({ num: n, malla, ruta }) => ({ num: n, malla, ruta })),
 });
 
 // ---------- carga de modelos ----------
@@ -797,13 +800,24 @@ function pintarPanel() {
   /** @type {HTMLButtonElement} */ ($('restablecer')).disabled = !(sel?.manijas || inversa);
   // las casillas muestran a los elegidos: tildada si todos siguen, a medias si algunos
   const elegidos = max?.controladores.filter((c) => estado.elegidos.has(c.id)) ?? [];
+  // en un movimiento que va sin offset o sin festoneado, ningún punto lo sigue ahí: la casilla
+  // se ve destildada y no se toca (cambiarla acá cambiaría esos puntos en todos los movimientos)
+  const sinAca = estado.maxilar && !esAdicional(estado.num) ? sinAjusteDe(estado.maxilar, estado.num) : {};
   for (const campo of ['offset', 'festoneado']) {
     const caja = /** @type {HTMLInputElement} */ ($(`usa-${campo}`));
+    const sinEste = sinAca[campo] === false;
     const siguen = elegidos.filter((c) => c[campo] !== false).length;
-    caja.disabled = !elegidos.length;
-    caja.checked = elegidos.length > 0 && siguen === elegidos.length;
-    caja.indeterminate = siguen > 0 && siguen < elegidos.length;
+    caja.disabled = !elegidos.length || sinEste;
+    caja.checked = !sinEste && elegidos.length > 0 && siguen === elegidos.length;
+    caja.indeterminate = !sinEste && siguen > 0 && siguen < elegidos.length;
+    /** @type {HTMLElement} */ (caja.parentElement).title = sinEste
+      ? `El movimiento ${estado.num} va sin ${campo}: se cambia con ⋯ en la línea de tiempo (o en Modelos)`
+      : `Si los puntos elegidos siguen al ${campo}, en todos los movimientos`;
   }
+  const notaSin = [sinAca.offset === false && 'offset', sinAca.festoneado === false && 'festoneado'].filter(Boolean);
+  $('nota-sin').hidden = !notaSin.length;
+  $('nota-sin').textContent = notaSin.length
+    ? `El movimiento ${estado.num} va sin ${notaSin.join(' ni ')}: ahí ningún punto lo sigue. Se cambia con ⋯ en la línea de tiempo.` : '';
   $('sin-modelos').hidden = estado.archivos.length > 0;
   $('faltantes').hidden = !pendientes.length;
   $('faltan-texto').textContent = pendientes.length
