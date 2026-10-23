@@ -13,8 +13,10 @@ públicas, que no tienen ese límite: el feed releases.atom y el .tar.gz del tag
 
 Actualizar baja el código del release elegido a app.nueva/ y lo revisa; el cambio de carpetas
 lo hace cambio.py, en un proceso aparte, cuando el servidor ya se cerró (Windows no deja
-renombrar app/ mientras el programa tiene algo abierto adentro). Las librerías de Python no se
-actualizan así: si un release pide una nueva, hay que bajar su instalador (se avisa antes).
+renombrar app/ mientras el programa tiene algo abierto adentro). Si un release pide una librería
+de Python que esta instalación no tiene y es Python puro (un wheel py3-none-any, como networkx),
+se baja de PyPI al runtime antes del cambio; una con partes compiladas no: hay que bajar el
+instalador de ese release (se avisa antes).
 """
 from __future__ import annotations
 
@@ -24,6 +26,7 @@ import os
 import re
 import shutil
 import ssl
+import sys
 import tarfile
 import time
 import urllib.error
@@ -144,16 +147,92 @@ def estado(buscar: bool = False) -> dict:
     return res
 
 
-def _requisitos(carpeta: Path) -> set[str]:
+def _requisitos(carpeta: Path) -> dict[str, str]:
+    """{nombre: línea} de requirements.txt (sin las de otro sistema, como pystray en Linux)."""
     try:
         lineas = (carpeta / "requirements.txt").read_text(encoding="utf-8").splitlines()
     except OSError:
-        return set()
-    return {re.split(r"[<>=!~\[; ]", x.strip(), maxsplit=1)[0].lower() for x in lineas if x.strip() and not x.strip().startswith("#")}
+        return {}
+    out = {}
+    for x in lineas:
+        x = x.split("#", 1)[0].strip()
+        if not x:
+            continue
+        nombre = re.split(r"[<>=!~\[; ]", x, maxsplit=1)[0].lower()
+        marca = x.split(";", 1)[1].strip() if ";" in x else ""
+        m = re.fullmatch(r"sys_platform\s*==\s*['\"]([^'\"]+)['\"]", marca)
+        if marca and m and m.group(1) != sys.platform:
+            continue
+        out[nombre] = x
+    return out
 
 
-def preparar(tag: str) -> tuple[Path, list[str]]:
-    """Baja y revisa el código de un release. Devuelve la carpeta lista y los avisos."""
+def _instalada_lib(nombre: str) -> bool:
+    from importlib import metadata
+    try:
+        metadata.version(nombre)
+        return True
+    except metadata.PackageNotFoundError:
+        return False
+
+
+def _version_pedida(linea: str) -> str | None:
+    m = re.search(r"==\s*([A-Za-z0-9._-]+)", linea)
+    return m.group(1) if m else None
+
+
+def _wheel_puro(nombre: str, version: str | None) -> tuple[str, str, bytes]:
+    """(nombre del archivo, versión, contenido) del wheel py3-none-any de PyPI."""
+    ruta = f"{nombre}/{version}" if version else nombre
+    info = json.loads(_pedir(f"https://pypi.org/pypi/{ruta}/json"))
+    version = info["info"]["version"]
+    for u in info.get("urls", []):
+        if u.get("packagetype") == "bdist_wheel" and u["filename"].endswith("-py3-none-any.whl"):
+            return u["filename"], version, _pedir(u["url"], timeout=120)
+    raise ValueError(f"{nombre} {version} no es Python puro: hay que bajar el instalador")
+
+
+def instalar_librerias(lineas: dict[str, str], destino: Path | None = None) -> list[str]:
+    """Baja de PyPI y descomprime en el runtime las librerías que faltan (y lo que ellas pidan).
+
+    Solo wheels de Python puro; si alguna no lo es, no se instala nada. Devuelve lo instalado.
+    """
+    import sysconfig
+    import zipfile
+    from email.parser import Parser
+
+    destino = destino or Path(sysconfig.get_paths()["purelib"])
+    pendientes = [(n, l) for n, l in lineas.items() if not _instalada_lib(n)]
+    bajados, vistos = [], set()
+    while pendientes:
+        nombre, linea = pendientes.pop()
+        if nombre in vistos:
+            continue
+        vistos.add(nombre)
+        archivo, version, datos = _wheel_puro(nombre, _version_pedida(linea))
+        with zipfile.ZipFile(io.BytesIO(datos)) as z:
+            meta = next(n for n in z.namelist() if n.endswith(".dist-info/METADATA"))
+            for req in Parser().parsestr(z.read(meta).decode("utf-8")).get_all("Requires-Dist") or []:
+                if ";" in req:                                   # extras u otro sistema: no hacen falta
+                    continue
+                dep = re.split(r"[<>=!~\[ (]", req.strip(), maxsplit=1)[0].lower()
+                if dep and not _instalada_lib(dep):
+                    pendientes.append((dep, req))
+        bajados.append((archivo, datos))
+    hechas = []
+    for archivo, datos in bajados:
+        with zipfile.ZipFile(io.BytesIO(datos)) as z:
+            for n in z.namelist():
+                if n.startswith(("/", "\\")) or ".." in Path(n).parts:
+                    raise ValueError(f"{archivo}: ruta rara adentro ({n})")
+            z.extractall(destino)
+        hechas.append(archivo)
+    return hechas
+
+
+def preparar(tag: str) -> tuple[Path, dict[str, str]]:
+    """Baja y revisa el código de un release. Devuelve la carpeta lista y las librerías que pide
+    y esta instalación no tiene ({nombre: línea de requirements.txt})."""
     if not re.fullmatch(r"[A-Za-z0-9._-]+", tag):
         raise ValueError(f"etiqueta inválida: {tag}")
     datos = _codigo(tag)
@@ -175,21 +254,23 @@ def preparar(tag: str) -> tuple[Path, list[str]]:
         raise ValueError(f"al release {tag} le falta: {', '.join(faltan)}")
     for n in FUERA:
         shutil.rmtree(nueva / n, ignore_errors=True)
-    avisos = []
-    nuevos = _requisitos(nueva) - _requisitos(APP)
-    if nuevos:
-        avisos.append(f"Este release usa librerías que esta instalación no trae ({', '.join(sorted(nuevos))}): bajá e instalá su instalador.")
-    return nueva, avisos
+    nuevas = {n: l for n, l in _requisitos(nueva).items() if not _instalada_lib(n)}
+    return nueva, nuevas
 
 
 def instalar(tag: str) -> dict:
-    """Deja la versión lista en app.nueva/; el cambio lo hace cambio.py al reiniciar."""
+    """Deja la versión lista en app.nueva/ (y sus librerías nuevas, si son Python puro); el
+    cambio lo hace cambio.py al reiniciar."""
     if not instalada():
         raise ValueError("esto es un checkout de desarrollo: se actualiza con git")
-    nueva, avisos = preparar(tag)
-    if avisos:
-        shutil.rmtree(nueva, ignore_errors=True)
-        raise ValueError(" ".join(avisos))
+    nueva, nuevas = preparar(tag)
+    if nuevas:
+        try:
+            instalar_librerias(nuevas)
+        except Exception as e:  # noqa: BLE001
+            shutil.rmtree(nueva, ignore_errors=True)
+            raise ValueError(f"Este release usa librerías que esta instalación no trae ({', '.join(sorted(nuevas))}) "
+                             f"y no se pudieron bajar ({e}): bajá e instalá su instalador.") from None
     return {"tag": tag, "modo": "instalar"}
 
 

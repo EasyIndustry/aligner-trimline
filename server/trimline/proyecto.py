@@ -56,7 +56,8 @@ def resolver(maxilar: dict, num: str, n: int | None = 500, paso: float | None = 
     """Controladores y curva de un movimiento, apoyados sobre la malla de ESE movimiento."""
     movs = maxilar["movimientos"]
     nums = [m["num"] for m in movs]
-    malla = mallas.obtener(next(m["malla"] for m in movs if m["num"] == num))
+    mov = next(m for m in movs if m["num"] == num)
+    malla = mallas.obtener(mov["malla"], mov.get("ruta"))
     # en este movimiento, ¿va sin offset o sin festoneado? Es como si ningún controlador los
     # siguiera: los puntos y los deslizadores no cambian, y los demás movimientos tampoco
     sin = (maxilar.get("sinAjuste") or {}).get(num) or {}
@@ -84,10 +85,10 @@ def resolver(maxilar: dict, num: str, n: int | None = 500, paso: float | None = 
 def adicional(maxilar: dict, num: str) -> dict:
     """La curva adicional `num` como un maxilar de un solo movimiento (sobre la malla de su origen)."""
     ad = (maxilar.get("adicionales") or {})[num]
-    malla = next((m["malla"] for m in maxilar["movimientos"] if m["num"] == ad.get("origen")), None)
-    if malla is None:
+    mov = next((m for m in maxilar["movimientos"] if m["num"] == ad.get("origen")), None)
+    if mov is None:
         raise ValueError(f"{num}: el movimiento {ad.get('origen')}, del que es copia, no está elegido")
-    return {**ad, "movimientos": [{"num": num, "malla": malla}]}
+    return {**ad, "movimientos": [{"num": num, "malla": mov["malla"], "ruta": mov.get("ruta")}]}
 
 
 def con_keyframe(maxilar: dict) -> list[str]:

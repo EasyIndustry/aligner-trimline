@@ -240,9 +240,27 @@ def test_curva_adicional_sale_aparte(domo_stl, tmp_path):
     # se resuelve como un maxilar de un movimiento
     from trimline import proyecto
     ad = proyecto.adicional(maxilar, "X01")
-    assert ad["movimientos"] == [{"num": "X01", "malla": m["id"]}]
+    assert ad["movimientos"] == [{"num": "X01", "malla": m["id"], "ruta": None}]
     assert cliente.post("/api/resolver", json={"maxilar": ad}).json()["movimientos"]["X01"]["cerrada"]
     # sin el movimiento de origen, error claro
     sin = {**maxilar, "adicionales": {"X09": {"origen": "09", "controladores": copia}}}
     r = cliente.post("/api/exportar", json={"id": "BN596", "maxilares": {"sup": sin}, "carpeta": str(tmp_path), "pisar": True})
     assert r.status_code == 422 and "09" in r.json()["detail"]
+
+
+def test_exportar_relee_una_malla_soltada(domo_stl, tmp_path):
+    """Otra pestaña abrió otro proyecto (soltó las mallas) o el servidor se reinició: se relee del disco."""
+    (tmp_path / "BN597 Caso Prueba 2.0 BIS Sup 01 CNC3.stl").write_bytes(domo_stl)
+    r = cliente.post("/api/mallas/carpeta", json={"carpeta": str(tmp_path)}).json()
+    m = r["mallas"][0]
+    assert cliente.post("/api/mallas/olvidar", json={"conservar": []}).status_code == 200
+    from trimline import mallas
+    mallas._RUTAS.clear()                       # como un servidor recién arrancado: solo sabe la página
+    maxilar = {"movimientos": [{"num": "01", "malla": m["id"], "ruta": m["ruta"]}], "controladores": anillo(num="01")}
+    r = cliente.post("/api/exportar", json={"id": "BN597", "maxilares": {"sup": maxilar}})
+    assert r.status_code == 200, r.text
+    # sin la ruta y sin haberla visto antes, no hay de dónde releerla
+    mallas.olvidar()
+    mallas._RUTAS.clear()
+    maxilar["movimientos"][0].pop("ruta")
+    assert cliente.post("/api/exportar", json={"id": "BN597", "maxilares": {"sup": maxilar}}).status_code == 404
